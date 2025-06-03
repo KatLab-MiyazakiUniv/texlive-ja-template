@@ -1,0 +1,47 @@
+\documentclass[a4paper,12pt]{jsarticle}
+
+% パッケージの読み込み
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{url}
+\usepackage[dvipdfmx]{hyperref}
+
+% タイトルページの情報
+\title{日本語LaTeX論文テンプレート}
+\author{著者名}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\tableofcontents
+\newpage
+
+\section{はじめに}
+
+これは日本語LaTeX執筆環境のサンプル文書です。
+
+\subsection{環境について}
+
+この環境では以下が利用可能です：
+\begin{itemize}
+    \item upLaTeX による日本語組版
+    \item BibTeX による参考文献管理
+    \item 数式記述
+    \item 図表の挿入
+\end{itemize}
+
+\section{数式の例}
+
+\begin{equation}
+    E = mc^2
+\end{equation}
+
+\section{まとめ}
+
+Docker環境で日本語LaTeX文書が作成できました。
+
+\end{document}
