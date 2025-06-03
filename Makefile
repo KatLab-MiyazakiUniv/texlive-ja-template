@@ -22,7 +22,7 @@ compile: ## src 下の .tex ファイルをコンパイル
 	@mkdir -p pdf build
 	@for tex in $(TEX_FILES); do \
 		echo "コンパイル: $$tex"; \
-		docker compose exec -T latex bash -c "cd /workspace && TEXINPUTS=./src//: latexmk -pdfdvi $$tex && bibtex build/$$(basename $$tex .tex)"; \
+		docker compose exec -T latex bash -c "cd /workspace && TEXINPUTS=./src//: latexmk -pdfdvi $$tex"; \
 		docker compose exec -T latex cp build/$$(basename $${tex%.tex}).pdf pdf/; \
 	done
 
