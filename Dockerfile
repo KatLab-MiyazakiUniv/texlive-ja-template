@@ -1,5 +1,4 @@
 FROM paperist/texlive-ja:latest
-# FROM ubuntu:25.10
 
 # 非対話的インストールのための環境変数
 ENV DEBIAN_FRONTEND=noninteractive
@@ -12,6 +11,12 @@ RUN apt-get update && \
     make \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
+
+# TeXLive パッケージのインストール
+RUN tlmgr update --self && \
+    tlmgr install \
+    algorithms \
+    algorithmicx
 
 # 作業ディレクトリの設定
 WORKDIR /workspace
