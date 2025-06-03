@@ -28,7 +28,12 @@ compile: ## src 下の .tex ファイルをコンパイル
 
 watch: ## ファイル変更を監視してコンパイル
 	@mkdir -p pdf build
-	docker compose exec -T latex bash -c "cd /workspace && TEXINPUTS=./src//: latexmk -pvc -pdfdvi src/*.tex"
+	@if [ -z "$(filter-out watch,$(MAKECMDGOALS))" ]; then \
+		echo "監視するファイルを指定してください。例: make watch sample.tex"; \
+		exit 1; \
+	fi
+	$(eval TEX_FILE := $(filter-out watch,$(MAKECMDGOALS)))
+	docker compose exec -T latex bash -c "cd /workspace && TEXINPUTS=./src//: latexmk -pvc -pdfdvi src/$(TEX_FILE)"
 
 clean: ## LaTeX 中間ファイルを削除
 	@for tex in $(TEX_FILES); do \
