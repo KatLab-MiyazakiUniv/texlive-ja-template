@@ -71,8 +71,8 @@ logs: ## コンテナのログを表示
 # 開発用コマンド
 setup: build up ## 初回セットアップ (ビルド + 起動)
 	@echo "環境が準備できました。以下のコマンドでコンパイルできます:"
-	@echo "  make compile  # sample.texをコンパイル"
-	@echo "  make watch    # ファイル変更を監視してコンパイル"
+	@echo "  make compile  # src 下の .tex ファイルをコンパイル"
+	@echo "  make watch sample.tex    # 指定ファイルの変更を監視してコンパイル"
 
 dev: up watch ## 開発モード (起動 + 監視コンパイル)
 
