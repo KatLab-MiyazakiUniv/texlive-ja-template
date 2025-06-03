@@ -1,0 +1,24 @@
+# LaTeX出力ファイル
+*.aux
+*.bbl
+*.blg
+*.fdb_latexmk
+*.fls
+*.log
+*.out
+*.synctex.gz
+*.toc
+*.lof
+*.lot
+*.dvi
+*.pdf
+
+# ビルドディレクトリ
+build/
+
+# macOS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/

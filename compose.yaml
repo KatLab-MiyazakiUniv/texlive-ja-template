@@ -1,0 +1,9 @@
+services:
+  latex:
+    build: .
+    container_name: latex-ja-thesis
+    volumes:
+      - .:/workspace
+    working_dir: /workspace
+    tty: true
+    stdin_open: true

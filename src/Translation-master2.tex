@@ -1,0 +1,732 @@
+\documentclass[uplatex, twocolumn,10pt]{jsarticle}
+
+\usepackage[dvipdfmx]{graphicx}
+\usepackage{latexsym}
+\usepackage{bmpsize}
+\usepackage{url}
+\usepackage{comment}
+\usepackage{amsmath}
+\usepackage{ltablex}
+\usepackage{enumitem}
+
+\usepackage{booktabs}
+\usepackage{multirow}
+
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{amsmath}
+
+% アルゴリズムの見出しを日本語に変更
+\floatname{algorithm}{アルゴリズム}
+
+\def\Underline{\setbox0\hbox\bgroup\let\\\endUnderline}
+\def\endUnderline{\vphantom{y}\egroup\smash{\underline{\box0}}\\}
+
+\newcommand{\ttt}[1]{\texttt{#1}}
+
+\begin{document}
+
+\title{
+    \bf{
+        \LARGE{An OpenCV-based Framework for Table Information Extraction} \\
+        \Large{OpenCV を用いた表情報抽出のためのフレームワーク}
+    }
+}
+\author{J. Yuan, H. Li, M. Wang, R. Liu, C. Li, and B. Wang \\
+    2020 IEEE International Conference on Knowledge Graph (ICKG), \\
+    2020, pp.621-628 \\
+    doi: 10.1109/ICBK50248.2020.00093.}
+\date{訳: 木村 優哉 \\ 2025年5月30日(金)}
+
+\maketitle
+
+
+\begin{abstract}
+    PDF (Portable Document Format) は最も普及したファイル形式の 1 つであり、特に教科書や論文などの教育文書において、元の外観を保持し、オンラインで容易に共有できるため有用である。
+    PDF ファイル内の表から情報を抽出することで、教育向けの知識グラフを構築するための構造化データを豊富に提供できる。
+    しかし、既存の手法の多数は PDF パースツールや自然言語処理技術に依存しており、一般的に学習サンプルを必要とし、ページをまたがる表の処理が困難である。
+    そこで本論文では、PDF の表からメタデータと具体的な値を抽出するための新しい OpenCV ベースのフレームワークを提案する。
+    具体的には、まず表の視覚的な輪郭を強調し、水平・垂直の線を用いて表を特定し、各 PDF ページにおけるセルの座標を取得する。
+    表が検出されると、各表に対してページをまたがるケースを検出し、光学式文字認識 (OCR) エンジンを使用して各表セル内の具体的な値を抽出する。
+    提案手法は、機械学習ベースの他の手法と異なり、ラベル付きデータなしで正確に表情報を抽出できる。
+    実世界の PDF ファイルで広範な実験を行い、結果は本アプローチがページをまたがる表に効果的に対応でき、1 つの表の処理に平均 6.12 秒しかかからないことを示している。\\
+    \textbf{キーワード}: 情報抽出、PDF、OpenCV
+\end{abstract}
+
+
+
+\section{はじめに}
+
+表は、情報表現の普遍的な形式として、科学論文、Web ページ、PDF 形式の財務報告書など、さまざまなプラットフォームで広く利用されている。
+表は、研究者が表現したい実験データや統計データを、非常に簡潔かつ明確な二次元の構造化形式で示すものである。
+多くの研究者によって、重要なメタデータや値を含む情報を取得するための表の検出と抽出が行われており、これは知識グラフの構築を支援することもある。
+しかし、人間が PDF 文書から表情報を認識することは難しくないものの、これらのデータを自動的に抽出することは困難である。
+この作業を行う上での主な課題は、事前に表を検出するための適切なアプローチを見つけることが難しいという点である。
+これは、表はその凝縮された形式のために通常ファイルの小さな部分しか占有せず、他の要素と混在するためである。
+さらに、PDF 文書内の表はほとんどの場合タグ付けされていない。
+上記の 2 点は、研究者が適切な表抽出方法を提案することを非常に困難にしている。
+
+Yildiz ら \cite{bib01} や Ramel ら \cite{bib02} などの既存の手法は、ある程度、表抽出技術の設計に成功しているが、依然として制約が存在する。
+これらの制約には、PDF から HTML への変換ツールの精度への依存や、PDF 文書に関する事前定義された仮定が含まれる。
+また、色付きの表、並列した表、および、複数ページにまたがる表の抽出について言及した論文はほとんどないことがわかった。
+これらの制限を克服するために、我々は電子文書における表の検出と抽出を自動的に行うだけでなく、特殊な表要素や複数ページにまたがる表の処理ステップを追加した手法を提案する。
+
+提案手法は、PDF 文書における表理解のために、概ね 3 つの連続したステップで構成される。
+第一に、PDF ファイル内の各ページに対して前処理ステップを実行し、表内の特殊な要素を処理可能な要素に変換する。
+第二に、水平線と垂直線を用いて表を特定し、各 PDF ページにおける表セルの座標を取得する。
+表が正常に検出されると、各表について、表内のすべてのセルを取得し、光学式文字認識 (OCR) エンジンを使用して各表セル内の文字を識別する。
+一連の操作の後、PDF内の表からメタデータ (例えば、ヘッダー、フォント、データ型、座標) とデータを正常に取得する。
+PDF 内の表をページ順に抽出するため、次のページに切り替える際には、ページをまたがる表があるかどうかを判定するアルゴリズムを実行する。
+
+本論文の貢献は以下の通りである：
+\begin{itemize}
+    \item PDF ファイルから表のメタデータとデータを自動的に抽出できる OpenCV ベースのフレームワークを紹介する。
+    \item 表検出およびメタデータ抽出中に色付きの表を処理できるモデルを提案する。
+    \item 並列した表や複数ページにまたがる表など、さまざまな種類の表を識別するアルゴリズムを設計する。
+\end{itemize}
+
+本論文の構成は以下の通りである。
+2 章では、表処理に関する従来の研究と OpenCV ライブラリのいくつかの使用法を簡単に紹介する。
+3 章では、表抽出方法について詳細に説明する。
+4 章では、提案手法の精度を検証し、失敗例と限界を分析する。
+5 章で我々の研究を結論を述べる。
+
+
+\section{関連研究 (省略予定)}
+
+本章では、表処理技術およびシステムに関する関連研究の従来の研究を、表情報抽出に関する先駆的研究、OpenCVの使用法、PDF情報抽出の方法という観点から議論する。
+
+\subsection{表情報抽出に関する先駆的研究}
+20年前から多くの調査研究が現れているが、その多くは問題の特定の側面にのみ焦点を当ててきた。
+LoprestiとNagy \cite{bib03} は、電子的形式の表の分析が、より高度な表理解に不可欠な貢献者となり得ることを見出した。
+彼らはまた、「表形式性」の定義や表形式ブラウジングについても検討した。
+Zanibbiら \cite{bib04} は、表モデル、観測、変換、推論を含む表認識プロセスを研究した。
+彼らは、上記の要素の相互作用として表認識の文献を提示した。
+Embleyら \cite{bib05} は、Wang \cite{bib06} によって提案されたモデルを分析し、それが明示的な情報が少ない有用なタスクに対して効果的であることを証明し、半自動表処理システムの開発計画の概要を述べた。
+
+Hurst \cite{bib07} は博士論文において、表理解のための抽象モデルを設計した。このモデルは、図的、物理的、機能的、構造的、意味的という5つの構成要素を含む。
+彼 \cite{bib08} は、表処理タスクを、表の位置特定、表認識、機能的および構造的分析、解釈という4つの手順に分割し、表の解釈をより容易にした。
+彼のモデルは競争力のあるものであったが、彼は主にモデル自体に関心があり、表抽出と理解の詳細についてはあまり関心がなかった。
+加えて、彼のプロセスの議論には、提案手法で不可欠な部分である、文書内の表を特定する能力が欠けていた。
+
+特定の文書形式の問題を解決するために、さまざまな表抽出技術が使用されてきた。
+表情報は、HTML、XML など、さまざまな文書形式に含まれている。
+Chen ら \cite{bib09} は、大規模なHTMLテキストから表を抽出する研究を発表した。
+彼らは、文字列、名前付きエンティティ、および数値カテゴリの類似性を使用して、それが実際の表であるかどうかを判定した。
+次に、これらのメトリックを適用してセルの類似性を計算し、表の読み取り方法 (行方向または列方向) を判定した。
+Tengli ら \cite{bib10} は、Web ページ内の HTML ページに焦点を当てた。
+彼らは、<table>タグを他のタグ (<tr>、<td>、<th>、<caption>) とともに使用して、表の構造を取得し、その内容を解析した。
+
+しかし、PDF ファイルにはバックエンドの HTML や XML がないため、彼らの手法を PDF ファイルに直接適用できない。
+問題とアプリケーションの要件はさまざまであるため、表抽出に関する研究も多様な手法を用いている。
+我々が扱う文書の特殊性に関して、提案手法は、包括的なプロセスにより、タグ付けされていない PDF ファイルの表抽出をサポートする。
+
+\subsection{PDF 表情報抽出の手法}
+編集不可能な文書を表現する最も広範な方法の1つとして、PDF ファイルは豊富な表構造と情報を持っており、PDF 表抽出のためのいくつかのツールと手段が登場している。
+Ramel ら \cite{bib02} は、表の表現スキームに基づいた手法を設計し、表の検出と抽出にグラフィックラインを使用した。
+彼らはまた、テキスト要素の規則性のみを利用することで、グラフィックマークがほとんどない表を扱う手法も提案した。
+
+TableSeer は、Liu ら \cite{bib11} によって提案された表検索エンジンである。
+これは、デジタルライブラリから科学文書 (主に PDF 文書) をクロールし、文書から表を識別し、表にインデックスを付けてランク付けし、ユーザーに検索インターフェースを提供する。
+これは、表題、フォント、空白、その他の要素を使用して表検出に使用できるボックスカッティング法で構築されている。
+このシステムは競争力があるものの、精度に大きく依存している。
+すべての表に表題があると想定しているため、表が他のキーワードでラベル付けされている場合には失敗し、再現率が低くなる。
+同様に、Perez-Arriaga ら \cite{bib12} は、PDF 文書内の表から情報を自動的に検出、抽出し、整理できるシステム TAO (TAble Organization) を提案した。
+しかし、TAO は表検出と表認識の両方で TableSeer よりも優れているものの、このシステムはグローバルな特徴をコンパクトな表現に集約する傾向があり、オブジェクト検出の実行にはあまり適していない。
+
+\cite{bib13} および \cite{bib14} におけるグラフィカルモデルもまた、性能向上を求めるために使用されてきた。
+\cite{bib14} では、Pintoらは、指定された入力ノード上の値の条件付き確率を計算するために使用できる無向グラフィカルモデルである条件付き確率場 (CRF) を表抽出に使用した。
+彼らは、文書の各行にタグを付けて表の境界を示し、境界、行列表、ヘッダーセルを認識するようにモデルを訓練した。
+テスト結果は良好だったが、モデルは列について何も知らず、データセルとヘッダーセルを区別することができない。
+
+研究者らはまた、表抽出のために PDF を XML に変換することも試みた。
+Yildiz ら \cite{bib01} は pdf2table システムを提案し、その中で pdftohtml ツールによって返されたデータを表認識 (「構成要素」を表として識別する) に使用した。
+次に、ヘッダー要素、スパニング動作 (すなわち、いくつの列または行がスパニングされているか) など、それらの中の情報を明らかにするために表を分解した。
+ユーザーが調整を行い制限を克服するためのグラフィカルユーザーインターフェースを備えているものの、品質は pdftohtml ツールに大きく依存する。
+特定の状況下 (例えば、抽出対象の表が画像である場合など) ではツールは有用な情報を返さず、これはユーザーによって適合させることができない。
+
+\subsection{OpenCVに関する使用法}
+OpenCV \cite{bib15} は、オープンソースのコンピュータービジョンライブラリである。
+これは多くの関数を提供し、多くのコンピュータービジョンアルゴリズムを効果的に実装する。
+
+画像処理は常に OpenCV の最も重要な機能の1つであり、エッジ検出はその重要なセグメントである。
+Xie と Lu \cite{bib16} は、OpenCV に基づいて、細いワイヤ内の銅コアの正確な数を検出およびカウントする手法を実装した。
+彼らは、形態学的オープニングおよびクロージング操作を使用して高解像度画像をセグメント化し、輪郭追跡によって数をカウントした。
+Pásztó と Hubinský \cite{bib17} は、移動ロボットナビゲーションに視覚システムを使用する可能性について議論した。
+彼らは、ロボットで実行される標識検出の一部である円と線を検出するためにハフ変換を使用した。
+
+OpenCV で広く使用されている色検出は、\cite{bib18}、\cite{bib19}、\cite{bib20} の交通標識認識 (TSR) の分野、および、\cite{bib21}、\cite{bib22}、\cite{bib23} の皮膚検出で利用されている。
+\cite{bib21} では、Oliveira と Conci が最初に RGB 画像を HSV 色空間に変換して、皮膚検出の色範囲を特徴付けている。
+
+OpenCV を実行するために、主に PDF 前処理のための色検出と、表認識および表セル値抽出のための水平線および垂直線検出に焦点を当てる。
+
+
+\section{提案手法}
+本手法のワークフローを図 \ref{fig1} に示す。
+提案手法は、PDF 前処理、表検出、セル値抽出の 3 つの要素で構成する。
+
+\begin{figure*}[t]
+    \begin{center}
+        \includegraphics*[width=0.8\textwidth]{image/master/master2/Fig1.png}
+        \caption{提案手法のアーキテクチャ}
+        \label{fig1}
+    \end{center}
+\end{figure*}
+
+\begin{enumerate}
+    \item \textbf{PDF前処理}:
+    PDF 文書を画像に変換し、関心領域 (ROI) の輪郭を明確にするための前処理を行う。
+    \item \textbf{表検出}:
+    上記で得られた画像に基づき、OpenCV を用いて PDF ファイルの各ページ上の表を検出し、各画像内のすべての輪郭情報を取得する。
+    \item \textbf{セル値抽出}:
+    各表のセルを検出し、そこからテキストを抽出する。
+    同時に、ページをまたがる表が存在するかどうかを判定し、存在する場合は前のページの表と結合する。
+    判定と表形式の解釈を通じて、PDF 内の表からメタデータとデータを取得する。
+\end{enumerate}
+
+我々は OpenCV を活用し、既存の豊富なコンピュータービジョン機能を利用する。
+また、Tesseract OCR エンジンも表セル値抽出のサポートのために使用する。
+具体的に、それらがどのように機能するかを以下で説明する。
+
+\subsection{PDF前処理}
+まず、OpenCV は PDF 文書を直接処理できないため、PDF ファイルをページごとに画像に変換する。
+
+特殊なケースとして、表の行や列に彩度の高い色が含まれている場合があり、表認識のための線検出が困難になることがある。
+この問題を解決するために、以下の手順を使用する：
+
+\begin{enumerate}
+    \item \textbf{彩度の抽出}:
+    「元画像」 (図 \ref{fig2}(a)) の色空間を BGR (青、緑、赤) から HSV (色相、彩度、明度) に変換し、彩度を抽出する。
+    結果を「彩度画像」 (図 \ref{fig2}(b)) として保存する。
+    \item \textbf{二値画像の取得}:
+    「彩度画像」を読み込み、グレースケール化、ガウシアンぼかし、その後、大津の二値化を画像に適用する。
+    \item \textbf{関心領域 （ROI） の検出}:
+    輪郭を見つけ、輪郭の周囲長と指定された精度の多角形曲線を用いた輪郭近似を使用してフィルタリングする。
+    領域が長方形であるという仮定のもと、輪郭近似結果が 4 であれば目的の領域が見つかる。
+    さらに、輪郭の面積を計算してノイズを除去する。
+    \item \textbf{ROI を元画像に置換}:
+    バウンディングボックスの座標を取得し、numpy スライシングで ROI を抽出することで、「元画像」に ROI を置換できるようにする。
+    画像を「置換画像」 (図 \ref{fig2}(c)) として保存する。
+\end{enumerate}
+
+\begin{figure}[t]
+    \begin{center}
+        \includegraphics*[width=7cm]{image/master/master2/Fig2.png}
+        \caption{各処理段階における 3 種類の画像 ((a) 元画像 (b) 彩度画像 (c) 置換画像)}
+        \label{fig2}
+    \end{center}
+\end{figure}
+
+
+\begin{algorithm}
+    \caption{PDF の処理}
+    \begin{algorithmic}
+    \State \textbf{Input}: A PDF document $D$
+    \State \textbf{Output}: A set of images $I$
+    \State \textit{Initialisation} : $I = \Phi$
+    \For{each page $p$ in $D$}
+        \State $image \leftarrow pdf\_to\_image(p)$
+        \If{$high\_saturated\_colors()$}
+            \State $image \leftarrow change\_image\_background(image)$
+        \EndIf
+        \State $I = I \cup image$
+    \EndFor
+    \Return $I$
+    \end{algorithmic}
+\end{algorithm}
+
+
+アルゴリズム 1 について、P を PDF ファイル内のページ数、C を置換対象の輪郭の数とする。
+PDF から画像への変換操作の計算量は $\mathcal{O}(1)$ である。
+画像の背景を変更する操作は、ページ内で条件を満たすすべての輪郭を変更するため、その計算量は $\mathcal{O}(C)$ となる。
+したがって、アルゴリズム 1 全体の計算量は $\mathcal{O}(PC)$ である。
+
+\subsection{表検出}
+次に、コンピュータービジョン技術に基づいて画像内の表を検出し、その位置を取得する。
+画像内に複数の表がある場合は、表を特定し、行と列が交差する場所に基づいて切り出す。
+
+\begin{enumerate}
+    \item \textbf{画像の閾値処理}:
+    OpenCV では、輪郭を見つけることは、黒い背景から白いオブジェクトを見つけるようなものである。
+    表に重点を置いているため、閾値処理を使用して表の線を白に、その他の背景を黒に変換する。
+    これを完了するために閾値処理を実行し、より高い精度を得るために二値画像も選択する。
+    \item \textbf{水平線と垂直線の識別}:
+    次に、形態学的操作を利用して表を検出する。
+    最初に、画像の幅に基づいて長さを決定した長方形カーネルを定義することである。
+    次に、画像内の水平線と垂直線を個別に検出する 2 つのカーネルを定義する。
+    これは形状に基づいた一連の画像処理操作であり、構造要素を入力画像に適用することによって出力画像を生成する。
+    ここで、カーネルを使用して連続的に収縮処理と膨張処理を行う。
+    これらの線を識別するにあたり、最も適切な水平カーネルと垂直カーネルを選択する。
+    これは、線を正確に識別し、画像内の表の特定に非常に役立つ。
+    図 \ref{fig3} (a) と図 \ref{fig3} (b) に線の識別結果を示しており、それぞれ水平線と垂直線を示す。
+    \item \textbf{すべての輪郭の取得}:
+    画像内のすべての水平線と垂直線に関する 2 つの画像をそれぞれ取得した後、これら 2 つの画像の合計を取得する。
+    これにより、元画像内の表の枠だけでなく、元の表内の情報も除外される。
+    したがって、表を正確に特定し、誤った抽出に起因するノイズの問題を軽減できる。
+    一連の操作の後、画像内の表の位置と形状を正常に取得する。
+    結果を図 \ref{fig3}(c) に示す。
+    輪郭とは、同じ色または強度を持つ連続するすべての点 (境界に沿った点) を結ぶ曲線として簡単に説明できる。
+    輪郭は、形状分析、オブジェクト検出、および認識に役立つツールである \cite{bib24}。
+    \textit{findContours} 関数を利用して、表自体と表内のすべてのセルを含む元画像内のすべての輪郭を取得し、セルの座標と幅、高さを取得する。
+    後続の処理を容易にするために、画像内の各輪郭を上から下、左から右の方法で並べ替える。
+\end{enumerate}
+
+\begin{figure}[t]
+    \begin{center}
+        \includegraphics*[width=7cm]{image/master/master2/Fig3.png}
+        \caption{表抽出における 3 種類の画像 ((a) 垂直線 (b) 水平線 (c) 画像から取得した表構造)}
+        \label{fig3}
+    \end{center}
+\end{figure}
+
+\subsection{セル値抽出}
+画像内の表のセル情報を取得し、それらを効果的に使用する。
+テキストコンテンツを読み取ることで、表を抽出する目的を達成する。
+Tesseract は光学式文字認識 (OCR) ツールであり、さまざまなフォント形式のさまざまな種類の画像に埋め込まれたテキストを認識して「読み取る」ことができる\cite{bib25}。
+Tesseract を利用することで、表のセルからテキストを抽出する。
+
+\begin{enumerate}
+    \item \textbf{実際のセルと偽のセルの区別}:
+    セルからテキストを読み取る前に、取得した各輪郭を確認し、前の手順で取得した幅と高さを調べて、ノイズの多い線から有用な情報を区別する。
+    幅または高さが特定の値より小さい場合、それらは表内のセルではなく雑多な線であると判定する。
+    フィルタリング処理が完了すると、各表について、表自体とそれに含まれるすべてのセルを含む有用な輪郭が得られる。
+    輪郭のサイズに基づいて、大きい方を表、小さい方をセルと判定する。
+    ヘッダーの抽出とページをまたがる表を判定するため、表情報を保存する。
+    \item \textbf{読み取りと判定}:
+    表からメタデータとデータを取得するために、表形式の解釈のためのいくつかの判定を提示する。
+    各セルについて、\textit{boundingRect} 関数から取得した座標、つまりセルの左上の角の座標を X 座標と Y 座標として使用する。
+    セルは並べ替えてあるので、各表セルを順番に処理する。
+    あるセル (x1, y1) の座標を、前のセル (x2, y2) の座標と比較して、以下の問題を解決する。
+    \begin{enumerate}
+        \item \textbf{独立した表}:
+        ほとんどの場合、同じ高さには1つの表しかない。
+        この状況下では、2 つの連続するセルが同じ行にあるか、または同じ表にあるかを Y 座標に基づいて判定するだけでよい。
+        詳細な判定は以下の通りである：
+        \begin{itemize}
+            \item y1 = y2 の場合、2 つのセルは同じ行にあると見なす。そうでない場合は、異なる行にあると見なされる。
+            \item y1 と y2 の差が大きすぎる場合は、それらが 2 つの異なる表に属すると判定する。
+        \end{itemize}
+        \item \textbf{並列した表}:
+        同じ行にあるすべてのセルは、同じ表にあるかどうかにかかわらず、左から右に読み取られ、行は上から下に読み取られる。
+        しかし、並列した表がある場合、Y 座標が同じ（または非常に近い）セルが同じ行にあると単純に判定できない。
+        この状況下では、セルを処理する際に、X 座標も判定する必要がある。
+        並列した表があるかどうかを判定する考え方は、2 つの連続するセル間のX座標の差 (つまり x2 - x1) に基づいている。
+        また、\textit{boundingRect} 関数から取得したセルの幅も考慮する。
+        この部分では、左側の表と右側の表の代表として T1 と T2 を使用する。
+        2 つの表は、ページの中央を境に、最尤に配置されていると仮定する。
+        判定のための詳細な規則は以下の通りである：
+        \begin{itemize}
+            \item x2 - x1 が常に妥当な間隔内にある場合、並列した表はないと判定する。仮定上の T2 は存在しない。
+            \item x2 - x1 が最初のセルの幅よりもはるかに大きい場合、連続する 2 つのセルは異なる表に属すると仮定できる。後続の各行を処理する際、まず処理対象のセルがページ全体の中心軸のどちら側にあるかに基づいて、T1にあるかT2にあるかを判定する。左側にあればT1に追加し、右側にあればT2にあると仮定する。各セルを処理した後、各セルがどの表に属するかを明示的に区別する。
+        \end{itemize}
+        \item \textbf{表ヘッダーの抽出}:
+        上述の通り、表のヘッダーの抽出は常に必要であると考えられる。
+        そこで、表の内容を抽出する前にそれを可能にするための規則も設定する。
+        各表セルの座標は既にわかっているので、表の上にある指定された領域のテキスト内容を表のヘッダーとして抽出するだけでよい。
+        \item \textbf{テキスト認識}:
+        Tesseract を使用して表セル内のテキスト内容を識別し、表形式解釈の最後のステップを完了する。
+    \end{enumerate}
+    \item \textbf{ページをまたがる表の判定}:
+    最初の画像の表抽出が完了し、2 番目の画像の処理を続けたい場合、ページをまたがる表があるかどうかについて重要な判定を行う必要がある。
+    ページをまたがる表が存在する場合、つまり最初の画像の最後の表と 2 番目の画像の最初の表が実際には同じ表のものである場合は、それらを連結する。
+    そうでない場合、2 つの表は完全に別のものとする。
+    この手法では、ページをまたがる表があるかどうかを判定するために、以下の規則が策定されている。
+    \begin{itemize}
+        \item 連続する 2 つのページにある表のみが、ページをまたがる表になり得る。
+        \item 2 番目の表は最初の表と同じ幅でなければならず、そうして初めてページをまたがる表になることができる。
+        \item 最初の表の下部は、そのページの下端よりも下にある必要がある。
+        \item 2 番目の表の上部は、そのページの上部領域にある必要がある。
+    \end{itemize}
+\end{enumerate}
+
+アルゴリズム 2 について、P を PDF ファイル内のページ数、C を処理対象の輪郭の数とする。
+輪郭の並べ替え操作の計算量は $\mathcal{O} (C \log C)$ である。
+画像の数はページ数と等しいため、アルゴリズム 2 全体の計算量は $\mathcal{O} (PC \log C)$ である。
+
+\begin{algorithm}
+    \caption{表検出とセル値抽出}
+    \begin{algorithmic}
+    \State \textbf{Data}: The set of images $I$
+    \State \textbf{Result}: Metadata and Data from tables in $I$
+    \For{each $img \in I$}
+        \State $img \leftarrow img$ after $cv2.\_threshold()$
+        \State define $vertical\_kernel$, $horizontal\_kernel$
+        \State $horizontal\_lines\_img$, $vertical\_lines\_img$ : result of
+        \State \quad morphological operations based on kernels
+        \State $final\_img \leftarrow$ add the two images above
+        \State $final\_img \leftarrow final\_img$ after $cv2.\_threshold()$
+        \State $contours \leftarrow cv2.findContours(final\_img)$
+        \State sort $contours$ by method
+        \For{each contour $c$ in $contours$}
+            \If{$c$ is the contour of a table}
+                \State get $table\_head\_text$ from the area above $c$
+                \State determine if there is a cross-page table
+                \State determine if there are many tables in one page
+            \ElsIf{$c$ is the contour of a cell}
+                \State extract $text$ from the cell
+                \State judge if it is the same row with the previous cell
+                \State determine if there are side-by-side tables
+            \EndIf
+            \State get the metadata and data from tables in the $img$
+        \EndFor
+        \State all metadata and data from tables in $I$
+    \EndFor
+    \end{algorithmic}
+\end{algorithm}
+
+
+\section{実験と分析}
+
+\subsection{実験設定}
+本節では、データセットの紹介、使用した評価指標、採用した技術など、実験の設定方法について説明する。
+提案手法のコードとデータセットは、以下の URL で入手できる。(GitHub の URL。400 行程度の Python ファイルと 52 個の複数ページの PDF ファイルを含むデータセットがあった)
+
+\textbf{データセット}:
+実験では、アルゴリズムをテストするために 3 つのデータセットを使用する。
+これらのデータセットの表は、通常、教育知識グラフの構築に役立つ情報を提供する。
+
+\begin{enumerate}
+    \item Web から収集した 119 個の表を含む 52 個の教育文書。
+    \item コンピュータサイエンスのさまざまな学会からの 191 個の表を含む 57 個の論文。
+    \item 中国知識グラフ・セマンティックコンピューティング会議 2019 (CCKS 2019) の評価タスクにおける第 5 のタスクのデータセットで、多くの企業の PDF 形式の財務報告書を含む。
+\end{enumerate}
+
+表 \ref{table1} にデータセットの詳細な統計を示す。
+さらに、このデータセットには多くのページをまたがる表が含まれており、ページをまたがる表を判定する提案手法のアルゴリズムをテストできる。
+
+\begin{table*}[t]
+    \centering
+    \caption{2 つのデータセットについての説明}
+    \label{table1}
+    \begin{tabular}{cccc}
+        データセット & ファイル数 & 表の数 & ページをまたぐ表の数 \\
+        \toprule
+        教育文書 & 52 & 119 & - \\
+        会議論文 & 57 & 191 & - \\
+        CCKS 財務報告書 & 10 & 337 & 96 \\
+    \end{tabular}
+\end{table*}
+
+\textbf{技術選定}:
+実験環境で採用した技術とそのバージョンは以下の通りである。
+\begin{itemize}
+    \item Python (バージョン 3.7.5)
+    \item Python の OpenCV ライブラリ (バージョン 3.4.2)
+    \item Tesseract OCR エンジン (バージョン 4.1.1)
+\end{itemize}
+
+\textbf{評価指標}:
+正解データが提供されていないため、比較の正しさは人間の理解によって判定される。
+表抽出手法の最後の 2 つのステップの性能を評価するために、再現率、適合率、F1 スコアの 3 つの指標を用いる。
+それらは、以下のように計算する：
+
+\begin{equation}
+    \text{再現率} = \frac{\text{正しく認識した表の数}}{\text{PDF 内にある表の数}}
+\end{equation}
+
+\begin{equation}
+    \text{適合率} = \frac{\text{正しく認識した表の数}}{\text{認識した表の数}}
+\end{equation}
+
+\begin{equation}
+    \text{F1 スコア} = \frac{2 \times \text{再現率} \times \text{適合率}}{\text{再現率} + \text{適合率}}
+\end{equation}
+
+提案手法の主な課題は、PDF 内の表を検出し、表からメタデータとデータを抽出して、表形式の解釈 (同一表からのデータかどうか、水平および垂直方向の順序がで正しいかどうか) のための最適な方法を見つけることである。
+表セル内の抽出したテキストの精度は、Tesseract OCR エンジンの内部アルゴリズムに大きく依存する。
+そのため、評価指標を計算するにあたり、テキストの精度については考慮しない。
+
+\subsection{既存手法との比較}
+Camelot エンジンを使用してその性能を評価し、提案手法と比較する。
+Camelot は表を抽出するための一般的なツールである。
+同時に、Tabula を使用してその性能もテストする。
+Tabula は多くの形式の表を検出できる。
+罫線のある表を扱う際には、ハフ変換によって、それらを検出する。
+上記の 2 つのツールはどちらも、ストリームとラティスという 2 種類の動作メカニズムを持っている。
+提案手法のアルゴリズムを既存手法のアルゴリズムと比較するため、主に OpenCV に基づいて実装されているラティスモードを使用する。
+
+\subsection{結果の分析}
+本節では、まずパラメータ感度の分析を行い、次に実験結果を分析する。
+
+\textbf{パラメータ感度}:
+表検出を行う際、カーネルのサイズは水平線と垂直線の検出において重要な役割を果たし、したがって表内のセルを認識する精度に大きな影響を与える。
+カーネルサイズの影響を明確にするために、図 \ref{fig4} の例を示す。
+実験を通して、カーネルの大きさは水平線の抽出よりも、垂直線の抽出に大きな影響を与えるという結論を出した。
+影響を 2 つのカテゴリに分ける：
+
+\begin{itemize}
+    \item カーネルサイズが小さい場合、画像上により多くのノイズの多い垂直線が現れる。これは、「1」、「I」、「T」などの文字がテキストに含まれており、OpenCV が誤認識するためである。
+    \item カーネルサイズが大きい場合、表の線、特に垂直線が失われる。
+\end{itemize}
+
+\begin{figure}[t]
+    \begin{center}
+        \includegraphics*[width=7cm]{image/master/master2/Fig4.png}
+        \caption{異なるカーネルサイズによる出力結果: (a) カーネルサイズ 62 (b) カーネルサイズ 15 (c) カーネルサイズ 7}
+        \label{fig4}
+    \end{center}
+\end{figure}
+
+したがって、画像の幅に基づいて適切な値を設定し、比較的満足のいく結果を得る。
+
+\textbf{結果}:
+データセットに対するさまざまな手法による表抽出の結果を表 \ref{table2} に示す。
+また、ページをまたがる表の判定結果を表 \ref{table3} に示す。
+提案手法は、約 82 \%の適合率と 90 \%以上の再現率で、85 \%以上の F1 スコアを達成した。
+Camelot と Tabula については、テキストベースの PDF でのみ動作し、複数のセルにまたがる行または列を含む表の抽出に失敗することがある。
+そのため、会議論文でのみテストした。
+1 つのデータセットでのみテストしたにもかかわらず、Tabula と Camelot の性能は低かった。
+Tabula では、自動選択機能 (つまり、PDF 内の表の位置が自動的に枠で囲まれる) は、表抽出に役立つ
+しかし、特定の場合には失敗し、表を識別する際に表の最終行が検出されない原因となる。
+Camelot を使用すると、特定のテキスト領域を表として誤認する。
+上記が、性能が悪くなる理由である。
+
+\begin{table*}[t]
+    \centering
+    \caption{表抽出の結果}
+    \label{table2}
+    \begin{tabular}{ccccc}
+        データセット & 手法 & 再現率 & 適合率 & F1 スコア \\
+        \toprule
+        教育文書 & 提案手法 & 79.8\% & 85.6\% & 82.6\% \\
+        CCKS 2019 & 提案手法 & 82.8\% & 90.3\% & 86.4\% \\
+        \multirow{3}{*}{会議論文} & 提案手法 & 90.1\% & 82.3\% & 86.0\% \\
+                                & Tabula (ラティス) & 51.5\% & 61.3\% & 56.0\% \\
+                                & Camelot (ラティス) & 50.6\% & 42.3\% & 46.1\% \\
+        \bottomrule
+    \end{tabular}
+\end{table*}
+
+\begin{table*}[t]
+    \centering
+    \caption{ページをまたぐ表の判定結果}
+    \label{table3}
+    \begin{tabular}{ccc}
+        ページをまたぐ表の合計 & 正しく認識した数 & 再現率 \\
+        \toprule
+        96 & 84 & 87.5\% \\
+    \end{tabular}
+\end{table*}
+
+\textbf{時間効率分析}:
+前のセクションでは、提案手法のアルゴリズムの時間計算量について分析した。
+本セクションでは、時間効率について、より詳細な分析を行う。
+
+異なるページに含まれる表の数はさまざまであるため、提案手法を PDF ファイルに適用した場合、異なるページから表を抽出する時間効率は大きく異なる可能性がある。
+認識時間のばらつきを、認識時間がいずれかの区間に入ったページ数に関するヒストグラム (図 \ref{fig5}(a) および図 \ref{fig5}(c)) で示す。
+また、各区間におけるすべてのページを認識するまでにかかった合計時間を示す折れ線グラフ (図 \ref{fig5}(b) および図 \ref{fig5}(d)) も作成した。
+財務報告書の各ページには、比較的多くの表が含まれているため、各ページの処理時間は比較的長くなる。
+全 508 ページの認識には 10350.13 秒かかり、1 ページあたりの平均認識時間は 20.37 秒である。
+会議論文の処理の時間効率は比較的よく、456 ページの処理にかかる合計時間は 2795.25 秒で、1 ページあたりの平均処理時間は 6.12 秒である。
+
+\begin{figure}[t]
+    \begin{center}
+        \includegraphics*[width=7cm]{image/master/master2/Fig5.png}
+        \caption{実験時間の統計: (a) 会議論文のヒストグラム (b) 会議論文の折れ線グラフ (c) CCSK のヒストグラム (d) CCKS の折れ線グラフ}
+        \label{fig5}
+    \end{center}
+\end{figure}
+
+時間計算量はアルゴリズムの時間効率の重要な指標であるが、アルゴリズム内の特定のステップの時間効率が高くないため、完全には信頼できない。
+したがって、提案手法において重要な Tesseract OCR の処理について、詳細に分析した。
+その結果、OCR がほとんどの時間を占めていることがわかった (図 \ref{fig6})。
+
+\begin{figure}[t]
+    \begin{center}
+        \includegraphics*[width=7cm]{image/master/master2/Fig6.png}
+        \caption{OCR にかかった合計時間の比較}
+        \label{fig6}
+    \end{center}
+\end{figure}
+
+\textbf{失敗例}:
+データセットで提案手法をテストした際、特定の PDF ファイルから表を正常に抽出できないことが判明した (図 \ref{fig7})。
+これは、フォーム抽出の精度にも一定の影響を与えた。
+さらに調査すると、これらのファイルに含まれる表はすべて同じ形式だった。
+セルの高さが非常に小さいため、不要な輪郭を除去するために使用されるセル高さ基準の下限に達することが困難であることがわかった。
+また、これらの特殊なスタイルの表は不連続な線を多く含み、カーネルサイズが大きすぎて認識できない。
+よって、あらかじめ定めた設定では、これらの表から内容を抽出できない。
+この問題に対処するため、表の形式に自動的に適応するカーネルサイズを設定する予定である。
+
+\begin{figure}[t]
+    \begin{center}
+        \includegraphics*[width=7cm]{image/master/master2/Fig7.png}
+        \caption{特定の PDF 表の例。左側の表の線は、最初の行のセルの高さが原因で正しく識別できていない。右側の表の赤い丸は、罫線の途切れを示しており、表の線の誤認識につながっている。}
+        \label{fig7}
+    \end{center}
+\end{figure}
+
+\textbf{限界分析}:
+ページをまたがる表や並列した表の判断を含め、表を抽出し、内容を認識するための規則を確立した。
+しかし、以下の場合には依然としてエラーは避けられない。
+
+\begin{enumerate}
+    \item セルの幅が設定した範囲よりも小さい場合、セルをノイズの線と見なし、除外する。
+    \item 並列した表があり、それらの間の距離が非常に小さい場合、それらを混同し、正しく認識できない。
+    \item 特定の表が、確立した規則を満たす場合に、ページをまたがる表と誤認する可能性がある。しかし、それらは同じ形式であっても、まったく異なる内容を持っている場合がある。
+    \item この手法は、表がほとんど枠なしである場合は適していない。
+\end{enumerate}
+
+
+\section{結論と今後の課題}
+本稿では、水平線と垂直線の検出に OpenCV を、テキスト認識に Tesseract OCR エンジンを利用して、PDF ファイル内の表を検出および抽出する効果的な手法を提案する。
+また、PDF ファイルの前処理、ノイズの多い線の除去、ページをまたがる表や、並列した表の判定を行う独自のアルゴリズムも設計した。
+提案手法は、良好な精度を達成した。
+格子線のない表や三線表に関しては、この手法の結果を保証することは困難であり、セルを取得した場合、表内容認識の精度は主に Tesseract の選択に依存することを伝える。
+今後は、機械学習手法を導入し、複雑な表タイプに対しての領域検出と、内容認識を実行できる数種類の物体検出モデルの構築を試みる。
+また、より高精度での画像内のテキスト認識を試みる。
+
+
+% ここまで翻訳済み
+
+
+
+
+\section{訳者の感想}
+画像処理のみで処理が完結する、文字抽出するなど、かなり似ている論文が見つかった。
+帳票では重複する表やページにまたがる表を考慮しなくてよい。
+一方で、下線部の取得や複雑な形の表に対応する必要があるため、帳票向けとしてこの論文のツールとは別の価値を生めそう。
+
+他の論文では、最近は機械学習を用いたり、登録している帳票のパターンに基づいて記入欄を検出する方法が多くあった。
+それらには、帳票のパターンの登録、データセットが必要という面で制約があることを示す予定。
+
+翻訳後、画像を入力対象とできるようファイルを拡張した。
+電子文書 (カメラではなく、画像としてきれいな文書) は、おおむね僕とほぼ同じ精度で取れていた。
+実行速度については、このツールが 約 4.33 秒 (矩形取得 0.20 秒、文字認識 4.13 秒)。自分のツールが、Tesseract 版で約 7.53 秒 (矩形・下線部取得 0.33 秒、文字認識 7.20 秒)、Google Vision API 版で約 2.67 秒 (矩形・下線部取得 0.33 秒、文字認識 2.34 秒) だった (10回 平均)。
+最も結果に差があったのは、電子化文書 (カメラで撮影した画像) の帳票画像 だった。
+矩形が 48 個ある電子化文書の帳票画像に対して、このツールは、4 つ矩形を検出したものの、1 つも正しく取れていなかった。
+自分のツールは、すべての矩形を検出できていた。
+実行速度については、このツールが 約 0.41 秒 (矩形取得 0.11 秒、文字認識 0.30 秒)。自分のツールが、Tesseract 版で約 12.94 秒 (矩形・下線部取得 1.72 秒、文字認識 11.22 秒)、Google Vision API 版で約 4.35 秒 (矩形・下線部取得 1.72 秒、文字認識 2.63 秒) だった (10 回平均)。
+
+電子化文書への対応などを考慮すると、精度面では、他の画像に対しても同等以上の結果になると予想する。
+実行速度の面では、ツールを Tesseract に揃えると、実行速度で負けてしまう。
+これは、矩形と下線部の区別など、フィルタリング処理でのループ回数がどうしても多くなってしまうためだと予想する。
+
+
+\begin{thebibliography}{99}
+    \bibitem{bib01}
+    B. Yildiz, K. Kaiser, and S. Miksch,
+    \newblock "pdf2table: A method to extract table information from pdf files",
+    \newblock { in {\em IICAI}, 2005, pp. 1773–1785.}
+
+    \bibitem{bib02}
+    J.-Y. Ramel, M. Crucianu, N. Vincent, and C. Faure,
+    \newblock “Detection, extraction and representation of tables”,
+    \newblock { in {\em Seventh International Conference on Document Analysis and Recognition 2003. Proceedings.}, IEEE, 2003, pp. 374–378.}
+
+    \bibitem{bib03}
+    D. Lopresti and G. Nagy,
+    \newblock {“A tabular survey of automated table processing”},
+    \newblock { in {\em International Workshop on Graphics Recognition}, Springer, 1999, pp. 93–120.}
+
+    \bibitem{bib04}
+    R. Zanibbi, D. Blostein, and J. Cordy,
+    \newblock {“A survey of table recognition: Models, observations, transformations, and inferences, 2003”},
+    \newblock { {\em Online: http://www.cs.queensu.ca/˜cordy/Papers/IJDARTables.pdf}, Last Checked, pp. 12–01, 2007.}
+
+    \bibitem{bib05}
+    D. W. Embley, D. Lopresti, and G. Nagy,
+    \newblock “Notes on contemporary table recognition”,
+    \newblock { in {\em International Workshop on Document Analysis Systems}, Springer, 2006, pp. 164–175.}
+
+    \bibitem{bib06}
+    X. Wang,
+    \newblock “Tabular abstraction, editing, and formatting”,
+    \newblock { 2016 }
+
+    \bibitem{bib07}
+    M. F. Hurst,
+    \newblock The interpretation of tables in texts",
+    \newblock { 2000 }
+
+    \bibitem{bib08}
+    M. Hurst,
+    \newblock “Layout and language: Challenges for table understanding on the web”,
+    \newblock { in {\em Proceedings of the International Workshop on Web Document Analysis}, 2001, pp. 27–30. }
+
+    \bibitem{bib09}
+    H.-H. Chen, S.-C. Tsai, and J.-H. Tsai,
+    \newblock “Mining tables from large scale html texts”,
+    \newblock { in {\em Proceedings of the 18th conference on Computational linguistics-Volume 1}, Association for Computational Linguistics, 2000, pp. 166–172. }
+
+    \bibitem{bib10}
+    A. Tengli, Y. Yang, and N. L. Ma,
+    \newblock “Learning table extraction from examples”,
+    \newblock { in {\em Proceedings of the 20th international conference on Computational Linguistics. Association for Computational Linguistics}, 2004, p. 987. }
+
+    \bibitem{bib11}
+    Y. Liu, K. Bai, P. Mitra, and C. L. Giles,
+    \newblock “Tableseer: automatic table metadata extraction and searching in digital libraries”,
+    \newblock { in {\em Proceedings of the 7th ACM/IEEE-CS joint conference on Digital libraries0}, 2007, pp. 91–100. }
+
+    \bibitem{bib12}
+    M. O. Perez-Arriaga, T. Estrada, and S. Abad-Mota,
+    \newblock “Tao: system for table detection and extraction from pdf documents”,
+    \newblock { in {\em The Twenty-Ninth International Flairs Conference}, 2016. }
+
+    \bibitem{bib13}
+    S. Shetty, H. Srinivasan, M. Beal, and S. Srihari,
+    \newblock “Segmentation and labeling of documents using conditional random fields”,
+    \newblock { in {\em Document Recognition and Retrieval XIV}, vol. 6500. International Society for Optics and Photonics, 2007, p. 65000U. }
+
+    \bibitem{bib14}
+    D. Pinto, A. McCallum, X. Wei, and W. B. Croft,
+    \newblock “Table extraction using conditional random fields”
+    \newblock { in {\em Proceedings of the 26th annual international ACM SIGIR conference on Research and development in informaion retrieval}, 2003, pp. 235–242. }
+
+    \bibitem{bib15}
+    G. Bradski and A. Kaehler,
+    \newblock “Learning OpenCV: Computer vision with the OpenCV library”
+    \newblock { O’Reilly Media, Inc.”, 2008. }
+
+    \bibitem{bib16}
+    G. Xie and W. Lu,
+    \newblock “Image edge detection based on opencv”,
+    \newblock { {\em International Journal of Electronics and Electrical Engineering}, vol. 1, no. 2, pp. 104–6, 2013. }
+
+    \bibitem{bib17}
+    P. P´aszt´o and P. Hubinsk`y,
+    \newblock "Application of a visual system for mobile robot navigation (opencv)",
+    \newblock { {\em AT\&P Journal Plus}, vol. 1, pp. 62-64, 2010. }
+
+    \bibitem{bib18}
+    P. Shopa, N. Sumitha, and P. Patra,
+    \newblock “Traffic sign detection and recognition using opencv”,
+    \newblock { in {\em International conference on information communication and embedded systems (ICICES2014)}. IEEE, 2014, pp. 1-6. }
+
+    \bibitem{bib19}
+    M. Russell and S. Fischaber,
+    \newblock “Opencv based road sign recognition on zynq”,
+    \newblock { in {\em 2013 11th IEEE International Conference on Industrial Informatics (INDIN)}. IEEE, 2013, pp. 596-601. }
+
+    \bibitem{bib20}
+    A. Lorsakul and J. Suthakorn,
+    \newblock “Traffic sign recognition for intelligent vehicle/driver assistance system using neural network on opencv”,
+    \newblock { in {\em The 4th International Conference on Ubiquitous Robots and Ambient Intelligence}, 2007. }
+
+    \bibitem{bib21}
+    V. Oliveira and A. Conci,
+    \newblock “Skin detection using hsv color space”,
+    \newblock { in {\em H. Pedrini, \& J. Marques de Carvalho, Workshops of Sibgrapi}. Citeseer, 2009, pp. 1-2. }
+
+    \bibitem{bib22}
+    K. Nikolskaia, N. Ezhova, A. Sinkov, and M. Medvedev,
+    \newblock “Skin detection technique based on hsv color model and slic segmentation method”,
+    \newblock { in {\em Proceedings of the 4th Ural Workshop on Parallel, Distributed, and Cloud Computing for Young Scientists, Ural-PDC}, 2018, pp. 123-135. }
+
+    \bibitem{bib23}
+    M. S. Kalas,
+    \newblock “Real time face detection and tracking using opencv”,
+    \newblock { {\em international journal of soft computing and Artificial Intelligence}, vol. 2, no. 1, pp. 41-44, 2014. }
+
+    \bibitem{bib24}
+    A. Mordvintsev and K. Abid,
+    \newblock “Opencv-python tutorials documentation”,
+    \newblock { {\em Obtenido de https://media.readthedocs.org/pdf/opencv-python-tutroals/latest/opencv-python-tutroals.pdf}, 2014. }
+
+    \bibitem{bib25}
+    https://pypi.org/project/pytesseract/.
+
+\end{thebibliography}
+
+\end{document}

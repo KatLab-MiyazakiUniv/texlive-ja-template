@@ -1,26 +1,23 @@
-# 日本語LaTeX執筆環境 (Docker)
+# 日本語 LaTeX 執筆環境 (Docker)
 
-このリポジトリは、Dockerを使用した日本語LaTeX執筆環境を提供します。
+このリポジトリは、Docker を使用した日本語 LaTeX 執筆環境を提供するリポジトリである。
 
 ## クイックスタート
 
-### Makefileを使用した簡単な操作
+### Makefile を使用した make コマンド
 
 ```bash
-# ヘルプを表示
-make help
-
-# 初回セットアップ
+# 初回セットアップ（Docker イメージのビルドと起動）
 make setup
 
-# PDFをコンパイル
+# TeXファイルのコンパイル（src/*.tex のすべてのファイル）
 make compile
 
-# ファイル変更を監視してコンパイル
+# ファイル変更を監視して自動コンパイル
 make watch
 
-# すべて実行（セットアップ→コンパイル→PDF表示）
-make all
+# 生成されたPDFを確認 (Mac のみ)
+make open-pdf
 ```
 
 ## 環境構築
@@ -28,56 +25,45 @@ make all
 ### 1. Dockerコンテナのビルドと起動
 
 ```bash
-# Makefileを使用
-make build
-make up
+# 初回セットアップ（推奨）
+make setup
 
-# または従来の方法
-docker-compose up -d --build
+# または個別に実行
+make build  # Dockerイメージをビルド
+make up     # コンテナを起動
 ```
 
-### 2. コンテナへの接続
+### 2. コンテナへの接続 (必要な場合)
 
 ```bash
-# Makefileを使用
 make exec
-
-# または従来の方法
-docker-compose exec latex bash
 ```
 
-## LaTeX文書のコンパイル
+## LaTeX文書の作成とコンパイル
 
-### 基本的なコンパイル
+### 1. TeXファイルの配置
+.tex ファイルは `src/` ディレクトリに配置すること：
+```
+src/
+├── sample.tex
+└── other.tex
+```
+
+### 2. コンパイル方法
 
 ```bash
-# Makefileを使用
+# src/ 下のすべての .tex ファイルをコンパイル
 make compile
 
-# または従来の方法
-latexmk sample.tex
+# 特定のファイルを監視して自動コンパイル
+make watch main.tex
 ```
 
-### 自動コンパイル（ファイル変更を監視）
-
-```bash
-# Makefileを使用
-make watch
-
-# または従来の方法
-latexmk -pvc sample.tex
-```
-
-### 手動コンパイル
-
-```bash
-uplatex sample.tex
-dvipdfmx sample.dvi
-```
+生成されたPDFファイルは `pdf/` ディレクトリに出力される。
 
 ## 利用可能なMakeコマンド
 
-| コマンド | 説明 |
+| コマンド (カッコ内は任意の引数) | 説明 |
 |---------|------|
 | `make help` | 利用可能なコマンド一覧を表示 |
 | `make setup` | 初回セットアップ（ビルド + 起動） |
@@ -85,52 +71,49 @@ dvipdfmx sample.dvi
 | `make up` | コンテナを起動 |
 | `make down` | コンテナを停止・削除 |
 | `make exec` | コンテナに接続 |
-| `make compile` | sample.texをコンパイル |
-| `make watch` | ファイル変更を監視してコンパイル |
-| `make pdf` | コンテナ起動してPDF生成 |
+| `make compile` | src/下のTeXファイルをコンパイル |
+| `make watch (sample.tex)` | 指定ファイルの変更を監視してコンパイル |
 | `make clean` | LaTeX中間ファイルを削除 |
 | `make clean-all` | すべてのLaTeX生成ファイルを削除 |
-| `make open-pdf` | 生成されたPDFを開く |
+| `make open-pdf` | 生成されたPDFを開く（Mac用） |
 | `make restart` | コンテナを再起動 |
 | `make rebuild` | 完全に再ビルド |
-| `make all` | すべて実行 |
+| `make dev` | 開発モード（起動 + 監視コンパイル） |
 
-## ファイル構成
+## ディレクトリ構成
 
-- `Dockerfile`: LaTeX環境のDockerイメージ定義
-- `compose.yaml`: Docker Compose設定
-- `Makefile`: ビルドタスクの定義
-- `.latexmkrc`: LaTeXmk設定ファイル
-- `sample.tex`: サンプルLaTeX文書
-- `build/`: コンパイル結果の出力ディレクトリ
-
-## 使用できるパッケージ
-
-- texlive-full: 完全なTeX Live環境
-- texlive-lang-japanese: 日本語サポート
-- latexmk: 自動コンパイルツール
-
-## コンテナの停止
-
-```bash
-# Makefileを使用
-make down
-
-# または従来の方法
-docker-compose down
+```
+texlive-japanese-template/
+├── Dockerfile          # Docker 環境定義
+├── compose.yaml        # Docker Compose 設定
+├── Makefile           # ビルドタスク定義
+├── .latexmkrc         # LaTeXmk 設定
+├── build/             # コンパイル中間ファイル
+│   └── *.aux, *.dvi など
+└── pdf/               # 生成されたPDF
+│   └── *.pdf
+├── src/               # TeX ソースファイル
+│   └── *.tex
 ```
 
-## トラブルシューティング
+## 使用できる TeXLive パッケージ
 
-### 文字化けが発生する場合
-- ファイルがUTF-8で保存されているか確認してください
-- `\usepackage[utf8]{inputenc}` が記述されているか確認してください
+- latexmk: 自動コンパイルツール
 
-### コンパイルエラーが発生する場合
-- ログファイル（.log）を確認してください
-- `make clean` でクリーンアップしてから再コンパイルしてみてください
+## 不具合対処
 
-### Dockerに関する問題
-- `make status` でコンテナの状態を確認
-- `make logs` でログを確認
-- `make rebuild` で完全に再ビルド
+1. ログファイルの確認
+```bash
+ls -l build/*.log
+```
+
+2. クリーンアップして再コンパイル
+```bash
+make clean-all  # すべての生成ファイルを削除
+make compile    # 再コンパイル
+```
+
+3. Docker環境の再構築
+```bash
+make rebuild    # コンテナの完全な再構築
+```
