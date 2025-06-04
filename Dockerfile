@@ -9,6 +9,8 @@ RUN apt-get update && \
     latexmk \
     git \
     make \
+    inotify-tools \
+    procps \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 

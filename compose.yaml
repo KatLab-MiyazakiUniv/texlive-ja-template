@@ -1,7 +1,7 @@
 services:
   latex:
     build: .
-    container_name: latex-ja-thesis
+    container_name: texlive-ja-template
     volumes:
       - .:/workspace
     working_dir: /workspace
