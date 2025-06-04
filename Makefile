@@ -1,11 +1,11 @@
 .PHONY: help build up down exec clean compile watch pdf stop logs
 
-# TeXファイルのリストを取得
+# TeX ファイルのリストを取得
 TEX_FILES := $(wildcard src/*.tex)
 PDF_FILES := $(patsubst src/%.tex,pdf/%.pdf,$(TEX_FILES))
 
 # デフォルトターゲット
-all: $(PDF_FILES) ## すべてのTeXファイルをPDFに変換
+all: $(PDF_FILES) ## すべての TeX ファイルを PDF に変換
 
 help: ## ヘルプを表示
 	@echo "利用可能なコマンド:"
@@ -17,7 +17,7 @@ pdf/%.pdf: src/%.tex
 	docker compose exec -T latex bash -c "cd /workspace && TEXINPUTS=./src//: latexmk -pdfdvi $<"
 	docker compose exec -T latex cp build/$(notdir $(basename $<)).pdf $@
 
-# LaTeX関連コマンド
+# LaTeX 関連コマンド
 compile: ## src 下の .tex ファイルをコンパイル
 	@mkdir -p pdf build
 	@for tex in $(TEX_FILES); do \
@@ -28,12 +28,18 @@ compile: ## src 下の .tex ファイルをコンパイル
 
 watch: ## ファイル変更を監視してコンパイル
 	@mkdir -p pdf build
-	@if [ -z "$(filter-out watch,$(MAKECMDGOALS))" ]; then \
-		echo "監視するファイルを指定してください。例: make watch sample.tex"; \
-		exit 1; \
-	fi
-	$(eval TEX_FILE := $(filter-out watch,$(MAKECMDGOALS)))
-	docker compose exec -T latex bash -c "cd /workspace && TEXINPUTS=./src//: latexmk -pvc -pdfdvi src/$(TEX_FILE)"
+	@echo "watching: src/*.tex"
+	docker compose exec -T latex bash -c '\
+		cd /workspace && \
+		while true; do \
+			changed_file=$$(inotifywait -e close_write,create --format "%w%f" src/*.tex); \
+			if [ -f "$$changed_file" ]; then \
+				echo "Compiling: $$changed_file"; \
+				TEXINPUTS=./src//: latexmk -pdfdvi "$$changed_file" && \
+				cp build/$$(basename "$$changed_file" .tex).pdf pdf/; \
+			fi; \
+		done \
+	'
 
 clean: ## LaTeX 中間ファイルを削除
 	@for tex in $(TEX_FILES); do \
@@ -53,7 +59,7 @@ clean-all: ## すべての LaTeX 生成ファイルを削除
 build: ## Docker イメージをビルド
 	docker compose build
 
-up: ## コンテナを起動（バックグラウンド）
+up: ## コンテナを起動 (バックグラウンド)
 	docker compose up -d
 
 down: ## コンテナを停止・削除
@@ -81,7 +87,7 @@ restart: down up ## コンテナを再起動
 rebuild: down build up ## 完全に再ビルド
 
 # ファイル操作
-open-pdf: ## 生成されたPDFを開く（Mac用）
+open-pdf: ## 生成されたPDFを開く (Mac用)
 	@if [ -f build/sample.pdf ]; then \
 		open build/sample.pdf; \
 	else \
