@@ -41,6 +41,13 @@ LATEX_SINGLE = $(LATEX_CMD)
 
 # デフォルトターゲット
 all: $(PDF_FILES) ## すべての TeX ファイルを PDF に変換
+	@if [ -n "$(TEX_FILES)" ]; then \
+		echo "コンパイル完了、ファイルの変更監視を開始"; \
+		make watch; \
+	else \
+		echo "[WARNING] src/ ディレクトリに .tex ファイルが見つかりません。"; \
+		exit 1; \
+	fi
 
 help: ## ヘルプを表示
 	@echo "利用可能なコマンド:"
@@ -60,6 +67,8 @@ compile: ## src 下の .tex ファイルをコンパイル
 		$(LATEX_CMD) $$tex; \
 		$(CP_CMD) build/$$(basename $${tex%.tex}).pdf pdf/; \
 	done
+	@echo "コンパイル完了、ファイルの変更監視を開始"
+	@make watch
 
 watch: ## ファイル変更を監視してコンパイル
 	@mkdir -p pdf build
