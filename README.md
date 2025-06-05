@@ -122,6 +122,7 @@ texlive-ja-template/
 ## 使用できる TeXLive パッケージ
 
 - latexmk: 自動コンパイルツール
+- algorythm, algorithmicx: アルゴリズム
 
 ## 不具合対処
 
