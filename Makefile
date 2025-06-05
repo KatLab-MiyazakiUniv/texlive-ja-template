@@ -24,17 +24,19 @@ LATEX_CLEAN = $(DOCKER_PREFIX) $(CD_PREFIX) latexmk -c
 LATEX_CLEAN_ALL = $(DOCKER_PREFIX) $(CD_PREFIX) latexmk -C
 CP_CMD = $(DOCKER_PREFIX) $(CD_PREFIX) cp
 RM_CMD = $(DOCKER_PREFIX) $(CD_PREFIX) rm -rf
-WATCH_CMD = $(DOCKER_PREFIX) bash -c '\
-    cd /workspace && \
+WATCH_CMD = $(DOCKER_PREFIX) bash -c 'cd /workspace && \
     while true; do \
-        changed_file=$$(inotifywait -e close_write,create --format "%w%f" src/*.tex); \
-        if [ -f "$$changed_file" ]; then \
-            echo "Compiling: $$changed_file"; \
-            TEXINPUTS=./src//: latexmk -pdfdvi "$$changed_file" && \
-            cp build/$$(basename "$$changed_file" .tex).pdf pdf/; \
-        fi; \
-    done \
-'
+        inotifywait -r -e modify,create,delete src/*.tex; \
+        echo "Changes detected, recompiling..."; \
+        for tex in src/*.tex; do \
+            if [ -f "$$tex" ]; then \
+                echo "Compiling: $$tex"; \
+                TEXINPUTS=./src//: latexmk -pdfdvi "$$tex" && \
+                mkdir -p pdf && \
+                cp build/$$(basename "$$tex" .tex).pdf pdf/ || echo "Failed to copy PDF for $$tex"; \
+            fi \
+        done; \
+    done'
 LATEX_SINGLE = $(LATEX_CMD)
 
 # デフォルトターゲット
