@@ -1,0 +1,13 @@
+{
+  "name": "TeX Live Japanese Development Container",
+  "dockerComposeFile": ["../compose.yaml"],
+  "service": "latex",
+  "workspaceFolder": "/workspace",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "James-Yu.latex-workshop"
+      ]
+    }
+  }
+}
