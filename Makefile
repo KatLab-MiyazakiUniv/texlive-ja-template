@@ -1,6 +1,6 @@
 .PHONY: help build up down exec clean compile watch pdf stop logs
 
-# TeX ファイルのリストを取得
+# TeXファイルのリストを取得
 TEX_FILES := $(wildcard src/*.tex)
 PDF_FILES := $(patsubst src/%.tex,pdf/%.pdf,$(TEX_FILES))
 
@@ -19,30 +19,20 @@ else
 endif
 
 # 共通のコマンドを定義
-LATEX_CMD = $(DOCKER_PREFIX) $(CD_PREFIX) TEXINPUTS=./src//: latexmk -pdfdvi
-LATEX_CLEAN = $(DOCKER_PREFIX) $(CD_PREFIX) latexmk -c
+LATEX_CMD       = $(DOCKER_PREFIX) $(CD_PREFIX) TEXINPUTS=./src//: LANG=ja_JP.UTF-8 LC_ALL=ja_JP.UTF-8 latexmk -pdfdvi
+LATEX_CLEAN     = $(DOCKER_PREFIX) $(CD_PREFIX) latexmk -c
 LATEX_CLEAN_ALL = $(DOCKER_PREFIX) $(CD_PREFIX) latexmk -C
-CP_CMD = $(DOCKER_PREFIX) $(CD_PREFIX) cp
-RM_CMD = $(DOCKER_PREFIX) $(CD_PREFIX) rm -rf
-WATCH_CMD = $(DOCKER_PREFIX) bash -c 'cd /workspace && \
-    while true; do \
-        inotifywait -r -e modify,create,delete src/*.tex; \
-        echo "Changes detected, recompiling..."; \
-        for tex in src/*.tex; do \
-            if [ -f "$$tex" ]; then \
-                echo "Compiling: $$tex"; \
-                TEXINPUTS=./src//: latexmk -pdfdvi "$$tex" && \
-                mkdir -p pdf && \
-                cp build/$$(basename "$$tex" .tex).pdf pdf/ || echo "Failed to copy PDF for $$tex"; \
-            fi \
-        done; \
-    done'
+CP_CMD          = $(DOCKER_PREFIX) $(CD_PREFIX) cp
+RM_CMD          = $(DOCKER_PREFIX) $(CD_PREFIX) rm -rf
+
+# ファイル監視スクリプト（全環境対応）
+WATCH_CMD       = $(DOCKER_PREFIX) bash -c "sed -i 's/\r$$//' /workspace/scripts/watch.sh && bash /workspace/scripts/watch.sh"
 LATEX_SINGLE = $(LATEX_CMD)
 
 # デフォルトターゲット
 all: $(PDF_FILES) ## すべての TeX ファイルを PDF に変換
 	@if [ -n "$(TEX_FILES)" ]; then \
-		echo "コンパイル完了、ファイルの変更監視を開始"; \
+		echo "コンパイル完了。ファイルの変更監視を開始します..."; \
 		make watch; \
 	else \
 		echo "[WARNING] src/ ディレクトリに .tex ファイルが見つかりません。"; \
@@ -70,9 +60,9 @@ compile: ## src 下の .tex ファイルをコンパイル
 	@echo "コンパイル完了、ファイルの変更監視を開始"
 	@make watch
 
-watch: ## ファイル変更を監視してコンパイル
+watch: ## ファイル変更を監視してコンパイル（全環境対応）
 	@mkdir -p pdf build
-	@echo "watching: src/*.tex"
+	@echo "watching: src/*.tex (auto-detecting best method for your environment)"
 	$(WATCH_CMD)
 
 clean: ## LaTeX 中間ファイルを削除
