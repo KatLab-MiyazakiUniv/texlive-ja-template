@@ -1,7 +1,7 @@
 .PHONY: help build up down exec clean compile watch pdf stop logs
 
-# TeXファイルのリストを取得
-TEX_FILES := $(wildcard src/*.tex)
+# TeXファイルのリストを取得（サブディレクトリも含む）
+TEX_FILES := $(shell find src -name "*.tex" -type f)
 PDF_FILES := $(patsubst src/%.tex,pdf/%.pdf,$(TEX_FILES))
 
 # 実行環境の判定
@@ -29,40 +29,72 @@ RM_CMD          = $(DOCKER_PREFIX) $(CD_PREFIX) rm -rf
 WATCH_CMD       = $(DOCKER_PREFIX) bash -c "sed -i 's/\r$$//' /workspace/scripts/watch.sh && bash /workspace/scripts/watch.sh"
 LATEX_SINGLE = $(LATEX_CMD)
 
-# デフォルトターゲット
-all: $(PDF_FILES) ## すべての TeX ファイルを PDF に変換
+# デフォルトターゲット - 初回コンパイル後、自動監視開始
+all: compile-all ## すべての TeX ファイルを PDF に変換し、監視開始
+
+# 初回コンパイル（監視なし）
+compile-all: $(PDF_FILES) ## すべての TeX ファイルを PDF に変換（監視なし）
 	@if [ -n "$(TEX_FILES)" ]; then \
-		echo "コンパイル完了。ファイルの変更監視を開始します..."; \
-		make watch; \
+		echo "初回コンパイル完了。"; \
 	else \
 		echo "[WARNING] src/ ディレクトリに .tex ファイルが見つかりません。"; \
 		exit 1; \
 	fi
 
+# デフォルト：初回コンパイル後、監視開始
+default: compile-all watch ## 初回コンパイル後、ファイル監視開始
+
+.DEFAULT_GOAL := default
+
 help: ## ヘルプを表示
 	@echo "利用可能なコマンド:"
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-15s\033[0m %s\n", $$1, $$2}'
 
-# ファイル別の PDF ビルドルール
+# ファイル別の PDF ビルドルール（エンコーディング対応）
 pdf/%.pdf: src/%.tex
-	@mkdir -p pdf build
-	docker compose exec -T latex bash -c "cd /workspace && TEXINPUTS=./src//: latexmk -pdfdvi $<"
-	docker compose exec -T latex cp build/$(notdir $(basename $<)).pdf $@
+	@mkdir -p pdf build $(dir $@)
+	@if echo "$<" | grep -q "UTF8/"; then \
+		echo "UTF-8ファイルをコンパイル: $<"; \
+		docker compose exec -T latex bash -c "cd /workspace/src/UTF8 && TEXINPUTS=.:../../src//: LANG=ja_JP.UTF-8 LC_ALL=ja_JP.UTF-8 uplatex -interaction=nonstopmode $(notdir $<)" || true; \
+		docker compose exec -T latex bash -c "cd /workspace/src/UTF8 && dvipdfmx -o ../../build/$(notdir $(basename $<)).pdf $(notdir $(basename $<)).dvi" || true; \
+	elif echo "$<" | grep -q "SJIS/"; then \
+		echo "SJISファイルをコンパイル: $<"; \
+		docker compose exec -T latex bash -c "cd /workspace/src/SJIS && TEXINPUTS=.:../../src//: LANG=ja_JP.SJIS LC_ALL=ja_JP.SJIS platex -interaction=nonstopmode $(notdir $<)" || true; \
+		docker compose exec -T latex bash -c "cd /workspace/src/SJIS && dvipdfmx -o ../../build/$(notdir $(basename $<)).pdf $(notdir $(basename $<)).dvi" || true; \
+	else \
+		echo "通常ファイルをコンパイル: $<"; \
+		docker compose exec -T latex bash -c "cd /workspace && TEXINPUTS=./src//: latexmk -pdfdvi $<" || true; \
+	fi
+	docker compose exec -T latex cp build/$(notdir $(basename $<)).pdf $@ || true
 
 # LaTeX 関連コマンド
-compile: ## src 下の .tex ファイルをコンパイル
+compile: ## src 下の .tex ファイルをコンパイル（エンコーディング対応）
 	@mkdir -p pdf build
 	@for tex in $(TEX_FILES); do \
 		echo "コンパイル: $$tex"; \
-		$(LATEX_CMD) $$tex; \
-		$(CP_CMD) build/$$(basename $${tex%.tex}).pdf pdf/; \
+		rel_path=$$(echo "$$tex" | sed 's|^src/||'); \
+		pdf_dir=pdf/$$(dirname "$$rel_path"); \
+		mkdir -p "$$pdf_dir"; \
+		if echo "$$tex" | grep -q "UTF8/"; then \
+			echo "UTF-8ファイルをコンパイル: $$tex"; \
+			$(DOCKER_PREFIX) bash -c "cd /workspace/src/UTF8 && TEXINPUTS=.:../../src//: LANG=ja_JP.UTF-8 LC_ALL=ja_JP.UTF-8 uplatex -interaction=nonstopmode $$(basename $$tex)" || true; \
+			$(DOCKER_PREFIX) bash -c "cd /workspace/src/UTF8 && dvipdfmx -o ../../build/$$(basename $${tex%.tex}).pdf $$(basename $${tex%.tex}).dvi" || true; \
+		elif echo "$$tex" | grep -q "SJIS/"; then \
+			echo "SJISファイルをコンパイル: $$tex"; \
+			$(DOCKER_PREFIX) bash -c "cd /workspace/src/SJIS && TEXINPUTS=.:../../src//: LANG=ja_JP.SJIS LC_ALL=ja_JP.SJIS platex -interaction=nonstopmode $$(basename $$tex)" || true; \
+			$(DOCKER_PREFIX) bash -c "cd /workspace/src/SJIS && dvipdfmx -o ../../build/$$(basename $${tex%.tex}).pdf $$(basename $${tex%.tex}).dvi" || true; \
+		else \
+			echo "通常ファイルをコンパイル: $$tex"; \
+			$(LATEX_CMD) $$tex || true; \
+		fi; \
+		pdf_name=$$(echo "$$rel_path" | sed 's/\.tex$$/\.pdf/'); \
+		$(CP_CMD) build/$$(basename $${tex%.tex}).pdf "pdf/$$pdf_name" || true; \
 	done
-	@echo "コンパイル完了、ファイルの変更監視を開始"
-	@make watch
+	@echo "コンパイル完了"
 
 watch: ## ファイル変更を監視してコンパイル（全環境対応）
 	@mkdir -p pdf build
-	@echo "watching: src/*.tex (auto-detecting best method for your environment)"
+	@echo "watching: src/**/*.tex (auto-detecting best method for your environment)"
 	$(WATCH_CMD)
 
 clean: ## LaTeX 中間ファイルを削除
