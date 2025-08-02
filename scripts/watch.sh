@@ -6,144 +6,167 @@ cd /workspace || {
   exit 1
 }
 
-tex_compile() {
+# ログ出力関数
+log_info() {
+  echo "[INFO] $*"
+}
+
+log_warn() {
+  echo "[WARN] $*"
+}
+
+log_error() {
+  echo "[ERROR] $*" >&2
+}
+
+# パス設定を決定する関数
+get_paths() {
   local tex="$1"
-  echo "[INFO] Compiling: $tex"
 
-  if [[ "$tex" =~ UTF8/ ]]; then
-    echo "[INFO] UTF-8 encoding detected: $tex"
-
-    # ディレクトリを適切に設定
-    if [[ "$tex" =~ IPSJ/UTF8/ ]]; then
-      cd src/IPSJ/UTF8
-      tex_file="$(basename "$tex")"
-    else
-      cd src/UTF8
-      tex_file="$(basename "$tex")"
-    fi
-
-    # 古いファイルをクリーンアップ（buildディレクトリから）
-    rm -f "../../../build/$(basename "$tex" .tex)".{aux,dvi,log,out,toc,synctex.gz}
-
-    # TEXINPUTSパスをディレクトリに応じて設定
-    if [[ "$tex" =~ IPSJ/ ]]; then
-      texinputs_path=".:./../../../src//:"
-      build_path="../../../build/$(basename "$tex" .tex).pdf"
-      output_dir="../../../build"
-    else
-      texinputs_path=.:../../src//:
-      build_path="../../build/$(basename "$tex" .tex).pdf"
-      output_dir="../../build"
-    fi
-
-    # 中間ファイルをbuildディレクトリに出力するためのオプション
-    TEXINPUTS="$texinputs_path" LANG=ja_JP.UTF-8 LC_ALL=ja_JP.UTF-8 uplatex -output-directory="$output_dir" -interaction=nonstopmode "$tex_file" || true
-    dvi_file="$output_dir/$(basename "$tex" .tex).dvi"
-    
-    # DVIファイルが生成されていれば成功とみなす（警告があっても）
-    if [[ -f "$dvi_file" ]]; then
-      pdf_output="$output_dir/$(basename "$tex" .tex).pdf"
-      if dvipdfmx -o "$pdf_output" "$dvi_file" 2>/dev/null; then
-        echo "[INFO] LaTeX compilation successful for $tex"
-      else
-        echo "[WARN] DVI to PDF conversion failed for $tex"
-      fi
-    else
-      echo "[WARN] LaTeX compilation failed for $tex - DVI file not generated"
-    fi
-
-    cd - >/dev/null
-  elif [[ "$tex" =~ SJIS/ ]]; then
-    echo "[INFO] SJIS encoding detected: $tex"
-
-    # ディレクトリを適切に設定
-    if [[ "$tex" =~ IPSJ/SJIS/ ]]; then
-      cd src/IPSJ/SJIS
-      tex_file="$(basename "$tex")"
-    else
-      cd src/SJIS
-      tex_file="$(basename "$tex")"
-    fi
-
-    # 古いファイルをクリーンアップ（buildディレクトリから）
-    rm -f "../../../build/$(basename "$tex" .tex)".{aux,dvi,log,out,toc,synctex.gz}
-
-    # TEXINPUTSパスをディレクトリに応じて設定
-    if [[ "$tex" =~ IPSJ/ ]]; then
-      texinputs_path=".:./../../../src//:"
-      build_path="../../../build/$(basename "$tex" .tex).pdf"
-      output_dir="../../../build"
-    else
-      texinputs_path=.:../../src//:
-      build_path="../../build/$(basename "$tex" .tex).pdf"
-      output_dir="../../build"
-    fi
-
-    # 中間ファイルをbuildディレクトリに出力するためのオプション
-    TEXINPUTS="$texinputs_path" LANG=ja_JP.SJIS LC_ALL=ja_JP.SJIS platex -output-directory="$output_dir" -interaction=nonstopmode "$tex_file" || true
-    dvi_file="$output_dir/$(basename "$tex" .tex).dvi"
-    
-    # DVIファイルが生成されていれば成功とみなす（警告があっても）
-    if [[ -f "$dvi_file" ]]; then
-      pdf_output="$output_dir/$(basename "$tex" .tex).pdf"
-      if dvipdfmx -o "$pdf_output" "$dvi_file" 2>/dev/null; then
-        echo "[INFO] LaTeX compilation successful for $tex"
-      else
-        echo "[WARN] DVI to PDF conversion failed for $tex"
-      fi
-    else
-      echo "[WARN] LaTeX compilation failed for $tex - DVI file not generated"
-    fi
-    
-    cd - >/dev/null
+  if [[ "$tex" =~ IPSJ/ ]]; then
+    echo "../../../build" ".:./../../../src//:"
   else
-    echo "[INFO] Standard encoding: $tex"
-    # 古いファイルをクリーンアップ（buildディレクトリから）
-    rm -f "build/$(basename "$tex" .tex)".{aux,dvi,log,out,toc,synctex.gz}
-    TEXINPUTS=./src//: LANG=ja_JP.UTF-8 LC_ALL=ja_JP.UTF-8 uplatex -output-directory=build -interaction=nonstopmode "$tex" || true
-    dvi_file="build/$(basename "$tex" .tex).dvi"
-    
-    # DVIファイルが生成されていれば成功とみなす（警告があっても）
-    if [[ -f "$dvi_file" ]]; then
-      if dvipdfmx -o "build/$(basename "$tex" .tex).pdf" "$dvi_file" 2>/dev/null; then
-        echo "[INFO] LaTeX compilation successful for $tex"
-      else
-        echo "[WARN] DVI to PDF conversion failed for $tex"
-      fi
-    else
-      echo "[WARN] LaTeX compilation failed for $tex - DVI file not generated"
-    fi
-  fi
-
-  # サブディレクトリ構造を維持してPDFをコピー
-  local rel_path="${tex#src/}"
-  local pdf_dir="pdf/$(dirname "$rel_path")"
-  mkdir -p "$pdf_dir"
-  local pdf_name="${rel_path%.tex}.pdf"
-  local build_pdf="build/$(basename "$tex" .tex).pdf"
-  
-  # PDFが存在するかチェックしてからコピー
-  if [[ -f "$build_pdf" ]]; then
-    if cp "$build_pdf" "pdf/$pdf_name"; then
-      echo "[INFO] PDF created: pdf/$pdf_name"
-    else
-      echo "[WARN] Failed to copy PDF for $tex"
-    fi
-  else
-    echo "[WARN] Build PDF not found: $build_pdf"
+    echo "../../build" ".:../../src//:"
   fi
 }
 
+# 中間ファイルをクリーンアップする関数
+cleanup_intermediate_files() {
+  local tex="$1"
+  local output_dir="$2"
+
+  rm -f "${output_dir}/$(basename "$tex" .tex)".{aux,dvi,log,out,toc,synctex.gz}
+}
+
+# DVIからPDFへの変換を行う関数
+convert_dvi_to_pdf() {
+  local tex="$1"
+  local output_dir="$2"
+
+  local dvi_file="${output_dir}/$(basename "$tex" .tex).dvi"
+  local pdf_output="${output_dir}/$(basename "$tex" .tex).pdf"
+
+  if [[ -f "$dvi_file" ]]; then
+    if dvipdfmx -o "$pdf_output" "$dvi_file" 2>/dev/null; then
+      log_info "LaTeX compilation successful for $tex"
+      return 0
+    else
+      log_warn "DVI to PDF conversion failed for $tex"
+      return 1
+    fi
+  else
+    log_warn "LaTeX compilation failed for $tex - DVI file not generated"
+    return 1
+  fi
+}
+
+# LaTeXコンパイルを実行する関数
+compile_latex() {
+  local tex="$1"
+  local encoding="$2"
+  local compiler="$3"
+
+  local tex_file="$(basename "$tex")"
+  local paths=($(get_paths "$tex"))
+  local output_dir="${paths[0]}"
+  local texinputs_path="${paths[1]}"
+
+  # 中間ファイルをクリーンアップ
+  cleanup_intermediate_files "$tex" "$output_dir"
+
+  # LaTeXコンパイル実行
+  local compile_cmd
+  if [[ "$encoding" == "UTF8" ]]; then
+    compile_cmd="TEXINPUTS=\"$texinputs_path\" LANG=ja_JP.UTF-8 LC_ALL=ja_JP.UTF-8 $compiler -output-directory=\"$output_dir\" -interaction=nonstopmode \"$tex_file\""
+  elif [[ "$encoding" == "SJIS" ]]; then
+    compile_cmd="TEXINPUTS=\"$texinputs_path\" LANG=ja_JP.SJIS LC_ALL=ja_JP.SJIS $compiler -output-directory=\"$output_dir\" -interaction=nonstopmode \"$tex_file\""
+  else
+    compile_cmd="TEXINPUTS=\"$texinputs_path\" LANG=ja_JP.UTF-8 LC_ALL=ja_JP.UTF-8 $compiler -output-directory=\"$output_dir\" -interaction=nonstopmode \"$tex\""
+  fi
+
+  eval "$compile_cmd" || true
+
+  # DVIからPDFへの変換
+  convert_dvi_to_pdf "$tex" "$output_dir"
+}
+
+# メインのコンパイル関数
+tex_compile() {
+  local tex="$1"
+  log_info "Compiling: $tex"
+
+  local original_dir="$(pwd)"
+
+  # エンコーディングとコンパイラを判定
+  if [[ "$tex" =~ UTF8/ ]]; then
+    log_info "UTF-8 encoding detected: $tex"
+
+    if [[ "$tex" =~ IPSJ/UTF8/ ]]; then
+      cd src/IPSJ/UTF8
+    else
+      cd src/UTF8
+    fi
+
+    compile_latex "$tex" "UTF8" "uplatex"
+
+  elif [[ "$tex" =~ SJIS/ ]]; then
+    log_info "SJIS encoding detected: $tex"
+
+    if [[ "$tex" =~ IPSJ/SJIS/ ]]; then
+      cd src/IPSJ/SJIS
+    else
+      cd src/SJIS
+    fi
+
+    compile_latex "$tex" "SJIS" "platex"
+
+  else
+    log_info "Standard encoding: $tex"
+
+    # 標準エンコーディングの場合は特別処理
+    cleanup_intermediate_files "$tex" "build"
+    TEXINPUTS=./src//: LANG=ja_JP.UTF-8 LC_ALL=ja_JP.UTF-8 uplatex -output-directory=build -interaction=nonstopmode "$tex" || true
+    convert_dvi_to_pdf "$tex" "build"
+  fi
+
+  cd "$original_dir"
+
+  # サブディレクトリ構造を維持してPDFをコピー
+  copy_pdf_to_output "$tex"
+}
+
+# PDFを最終出力ディレクトリにコピーする関数
+copy_pdf_to_output() {
+  local tex="$1"
+  local rel_path="${tex#src/}"
+  local pdf_dir="pdf/$(dirname "$rel_path")"
+  local pdf_name="${rel_path%.tex}.pdf"
+  local build_pdf="build/$(basename "$tex" .tex).pdf"
+
+  mkdir -p "$pdf_dir"
+
+  if [[ -f "$build_pdf" ]]; then
+    if cp "$build_pdf" "pdf/$pdf_name"; then
+      log_info "PDF created: pdf/$pdf_name"
+    else
+      log_warn "Failed to copy PDF for $tex"
+    fi
+  else
+    log_warn "Build PDF not found: $build_pdf"
+  fi
+}
+
+# 単一ファイルコンパイル関数
 compile_single() {
   local tex="$1"
   tex_compile "$tex"
-  echo "[INFO] Single file compilation finished for: $tex"
+  log_info "Single file compilation finished for: $tex"
 }
 
 # シグナルハンドリング
-trap 'echo "[INFO] Watch stopped"; exit 0' SIGINT SIGTERM
+trap 'log_info "Watch stopped"; exit 0' SIGINT SIGTERM
 
-echo "[INFO] Using polling method for Docker mount compatibility"
+log_info "Using polling method for Docker mount compatibility"
 
 # ポーリング監視
 declare -A file_times
@@ -151,15 +174,16 @@ declare -A file_times
 # 初期ファイル時刻を記録
 while IFS= read -r -d '' tex; do
   file_times["$tex"]=$(stat -c %Y "$tex" 2>/dev/null || stat -f %m "$tex")
-  echo "[INFO] Tracking: $tex"
+  log_info "Tracking: $tex"
 done < <(find src -name "*.tex" -type f -print0)
 
+# メインの監視ループ
 while true; do
   while IFS= read -r -d '' tex; do
     current=$(stat -c %Y "$tex" 2>/dev/null || stat -f %m "$tex")
     if [[ "${file_times[$tex]:-}" != "$current" ]]; then
       file_times["$tex"]=$current
-      echo "[INFO] Change detected in: $tex"
+      log_info "Change detected in: $tex"
       compile_single "$tex"
     fi
   done < <(find src -name "*.tex" -type f -print0)
