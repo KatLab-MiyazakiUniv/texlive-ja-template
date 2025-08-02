@@ -52,12 +52,25 @@ Dev Container 環境下では Docker 関連のコマンドの操作は不要。
 ## LaTeX文書の作成とコンパイル
 
 ### 1. TeXファイルの配置
-.tex ファイルは `src/` ディレクトリに配置すること：
+
+#### 標準的なLaTeX文書
 ```
 src/
 ├── sample.tex
 └── other.tex
 ```
+
+#### IPSJ論文形式
+IPSJ論文の場合は、エンコーディングに応じたサブディレクトリに配置：
+```
+src/IPSJ/
+├── UTF8/              # UTF-8エンコーディング（推奨）
+│   └── paper.tex
+└── SJIS/              # Shift-JISエンコーディング
+    └── paper.tex
+```
+
+他にも必要なファイルが複数存在するため、各自のリンクもしくは [情報処理学会, LaTeXスタイルファイル、MS-Wordテンプレートファイル](https://www.ipsj.or.jp/journal/submit/style.html) からテンプレートのフォルダを入手し、ファイルを各ディレクトリへコピーすること。
 
 ### 2. コンパイル方法
 
@@ -72,7 +85,7 @@ make compile
 make watch
 ```
 
-生成されたPDFファイルは `pdf/` ディレクトリに出力される。
+生成されたPDFファイルは `pdf/` ディレクトリにサブディレクトリ構造を保持して出力される。
 
 ## 利用可能なMakeコマンド
 
@@ -87,6 +100,22 @@ make watch
 | `make clean`     | LaTeX 中間ファイルを削除 |
 | `make clean-all` | すべての LaTeX 生成ファイルを削除 |
 | `make open-pdf`  | 生成された PDF を開く (Mac用) |
+
+### IPSJ論文専用コマンド
+
+| コマンド          | 説明                                                         |
+|------------------|-------------------------------------------------------------|
+| `make convert-punctuation FILE=path/to/file.tex` | 指定したIPSJファイルの句読点を変換（、→，、。→．） |
+| `make restore-punctuation FILE=path/to/file.tex` | 変換前の句読点に戻す |
+
+**使用例:**
+```bash
+# 句読点変換
+make convert-punctuation FILE=src/IPSJ/UTF8/paper.tex
+
+# 句読点復元
+make restore-punctuation FILE=src/IPSJ/UTF8/paper.tex
+```
 
 ### Docker 関連コマンド
 
@@ -111,33 +140,81 @@ texlive-ja-template/
 ├── compose.yaml        # Docker Compose 設定
 ├── Makefile           # ビルドタスク定義
 ├── .latexmkrc         # LaTeXmk 設定
+├── scripts/           # ビルドスクリプト
+│   └── watch.sh       # ファイル監視スクリプト
 ├── build/             # コンパイル中間ファイル
 │   └── *.aux, *.dvi など
-└── pdf/               # 生成されたPDF
+├── pdf/               # 生成されたPDF
 │   └── *.pdf
-├── src/               # TeX ソースファイル
-│   └── *.tex
+└── src/               # TeX ソースファイル
+    ├── *.tex          # 標準的なLaTeXファイル
+    └── IPSJ/          # IPSJ論文形式
+        ├── UTF8/      # UTF-8エンコーディング用
+        │   ├── .latexmkrc # 2025年8月現在のもの、コンパイルオプション等に変更があれば編集必須
+        │   ├── ipsj.cls   # クラスファイル、テンプレートファイルからコピーして配置
+        │   └── *.tex
+        └── SJIS/      # Shift-JISエンコーディング用
+            ├── .latexmkrc
+            ├── ipsj.cls
+            └── *.tex
 ```
+
+## 対応する論文形式とエンコーディング
+
+### 標準LaTeX
+- **エンコーディング**: UTF-8
+- **コンパイラ**: uplatex + dvipdfmx
+- **配置場所**: `src/*.tex`
+
+### IPSJ論文形式
+- **エンコーディング**: UTF-8 または Shift-JIS
+- **コンパイラ**: uplatex + dvipdfmx
+- **配置場所**:
+  - UTF-8: `src/IPSJ/UTF8/*.tex`
+  - SJIS: `src/IPSJ/SJIS/*.tex`
+- **クラスファイル**: 各ディレクトリに各自で配置する (2025/8 現在、ファイル名は ipsj.cls)
+- **句読点**: `make convert-punctuation` コマンドによる自動変換機能に対応（、→，、。→．）
 
 ## 使用できる TeXLive パッケージ
 
 - latexmk: 自動コンパイルツール
 - algorythm, algorithmicx: アルゴリズム
+- graphicx: 図版挿入
+- color: カラー対応
 
 ## 不具合対処
 
-1. ログファイルの確認
+### 一般的な問題
+
+1. **ログファイルの確認**
 ```bash
 ls -l build/*.log
 ```
 
-2. クリーンアップして再コンパイル
+2. **クリーンアップして再コンパイル**
 ```bash
 make clean-all  # すべての生成ファイルを削除
 make compile    # 再コンパイル
 ```
 
-3. Docker環境の再構築
+3. **Docker環境の再構築**
 ```bash
 make rebuild    # コンテナの完全な再構築
 ```
+
+### IPSJ論文特有の問題
+
+1. **フォントエラーが発生する場合**
+   - IPSJクラスファイル(ipsj.cls)がipsj.clsの日本語フォント定義でエラーが発生することがありますが、デフォルトフォントで代替されるため問題ありません
+
+2. **句読点の変換を間違えた場合**
+```bash
+# 元に戻す
+make restore-punctuation FILE=src/IPSJ/UTF8/your-file.tex
+```
+
+3. **エンコーディングエラーが発生する場合**
+   - UTF-8ファイルは `src/IPSJ/UTF8/` に配置
+   - Shift-JISファイルは `src/IPSJ/SJIS/` に配置
+   - ファイルのエンコーディングとディレクトリが一致していることを確認
+   - .tex ファイル内で使用するクラスファイルを確認
