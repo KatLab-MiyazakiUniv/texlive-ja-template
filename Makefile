@@ -1,4 +1,4 @@
-.PHONY: help build up down exec clean compile watch pdf stop logs
+.PHONY: help build up down exec clean compile watch pdf stop logs convert-punctuation restore-punctuation
 
 # TeXファイルのリストを取得（サブディレクトリも含む）
 TEX_FILES := $(shell find src -name "*.tex" -type f)
@@ -180,3 +180,35 @@ open-pdf: ## 生成されたPDFを開く（Mac用）
 	else \
 		echo "PDFファイルが見つかりません。先に make compile を実行してください。"; \
 	fi
+
+# IPSJ形式の句読点変換
+convert-punctuation: ## 指定したIPSJファイルの句読点を変換（例: make convert-punctuation FILE=src/IPSJ/UTF8/sample.tex）
+	@if [ -z "$(FILE)" ]; then \
+		echo "[ERROR] ファイルを指定してください。例: make convert-punctuation FILE=src/IPSJ/UTF8/sample.tex"; \
+		exit 1; \
+	fi
+	@if [ ! -f "$(FILE)" ]; then \
+		echo "[ERROR] ファイルが見つかりません: $(FILE)"; \
+		exit 1; \
+	fi
+	@if ! echo "$(FILE)" | grep -q "IPSJ/"; then \
+		echo "[ERROR] IPSJディレクトリ下のファイルを指定してください"; \
+		exit 1; \
+	fi
+	@echo "句読点を変換中: $(FILE)"
+	@$(DOCKER_PREFIX) bash -c "cd /workspace && cp '$(FILE)' '$(FILE).bak' && sed -i 's/、/，/g; s/。/．/g' '$(FILE)'"
+	@echo "変換完了。元ファイルは $(FILE).bak として保存されました。"
+	@echo "元に戻すには: make restore-punctuation FILE=$(FILE)"
+
+restore-punctuation: ## 変換前の句読点に戻す（例: make restore-punctuation FILE=src/IPSJ/UTF8/sample.tex）
+	@if [ -z "$(FILE)" ]; then \
+		echo "[ERROR] ファイルを指定してください。例: make restore-punctuation FILE=src/IPSJ/UTF8/sample.tex"; \
+		exit 1; \
+	fi
+	@if [ ! -f "$(FILE).bak" ]; then \
+		echo "[ERROR] バックアップファイルが見つかりません: $(FILE).bak"; \
+		exit 1; \
+	fi
+	@echo "句読点を復元中: $(FILE)"
+	@$(DOCKER_PREFIX) bash -c "cd /workspace && mv '$(FILE).bak' '$(FILE)'"
+	@echo "復元完了: $(FILE)"
