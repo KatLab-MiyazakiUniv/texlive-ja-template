@@ -25,9 +25,14 @@ LATEX_CLEAN_ALL = $(DOCKER_PREFIX) $(CD_PREFIX) latexmk -C
 CP_CMD          = $(DOCKER_PREFIX) $(CD_PREFIX) cp
 RM_CMD          = $(DOCKER_PREFIX) $(CD_PREFIX) rm -rf
 
+# エンコーディング別コンパイルコマンド
+UTF8_COMPILE    = $(DOCKER_PREFIX) bash -c "cd /workspace/src/UTF8 && TEXINPUTS=.:../../src//: LANG=ja_JP.UTF-8 LC_ALL=ja_JP.UTF-8 uplatex -interaction=nonstopmode"
+SJIS_COMPILE    = $(DOCKER_PREFIX) bash -c "cd /workspace/src/SJIS && TEXINPUTS=.:../../src//: LANG=ja_JP.SJIS LC_ALL=ja_JP.SJIS platex -interaction=nonstopmode"
+DVI_TO_PDF_UTF8 = $(DOCKER_PREFIX) bash -c "cd /workspace/src/UTF8 && dvipdfmx -o ../../build"
+DVI_TO_PDF_SJIS = $(DOCKER_PREFIX) bash -c "cd /workspace/src/SJIS && dvipdfmx -o ../../build"
+
 # ファイル監視スクリプト（全環境対応）
 WATCH_CMD       = $(DOCKER_PREFIX) bash -c "sed -i 's/\r$$//' /workspace/scripts/watch.sh && bash /workspace/scripts/watch.sh"
-LATEX_SINGLE = $(LATEX_CMD)
 
 # デフォルトターゲット - 初回コンパイル後、自動監視開始
 all: compile-all ## すべての TeX ファイルを PDF に変換し、監視開始
@@ -50,46 +55,44 @@ help: ## ヘルプを表示
 	@echo "利用可能なコマンド:"
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-15s\033[0m %s\n", $$1, $$2}'
 
+# ヘルパー関数: ファイルタイプを判定
+define get_file_type
+$(if $(findstring UTF8/,$(1)),UTF8,$(if $(findstring SJIS/,$(1)),SJIS,NORMAL))
+endef
+
+# ヘルパー関数: エンコーディング別コンパイル
+define compile_by_encoding
+$(if $(filter UTF8,$(call get_file_type,$(1))),\
+	$(UTF8_COMPILE) $(notdir $(1)) || true && $(DVI_TO_PDF_UTF8)/$(notdir $(basename $(1))).pdf $(notdir $(basename $(1))).dvi || true,\
+	$(if $(filter SJIS,$(call get_file_type,$(1))),\
+		$(SJIS_COMPILE) $(notdir $(1)) || true && $(DVI_TO_PDF_SJIS)/$(notdir $(basename $(1))).pdf $(notdir $(basename $(1))).dvi || true,\
+		$(DOCKER_PREFIX) bash -c "cd /workspace && TEXINPUTS=./src//: latexmk -pdfdvi $(1)" || true\
+	)\
+)
+endef
+
 # ファイル別の PDF ビルドルール（エンコーディング対応）
 pdf/%.pdf: src/%.tex
 	@mkdir -p pdf build $(dir $@)
-	@if echo "$<" | grep -q "UTF8/"; then \
-		echo "UTF-8ファイルをコンパイル: $<"; \
-		docker compose exec -T latex bash -c "cd /workspace/src/UTF8 && TEXINPUTS=.:../../src//: LANG=ja_JP.UTF-8 LC_ALL=ja_JP.UTF-8 uplatex -interaction=nonstopmode $(notdir $<)" || true; \
-		docker compose exec -T latex bash -c "cd /workspace/src/UTF8 && dvipdfmx -o ../../build/$(notdir $(basename $<)).pdf $(notdir $(basename $<)).dvi" || true; \
-	elif echo "$<" | grep -q "SJIS/"; then \
-		echo "SJISファイルをコンパイル: $<"; \
-		docker compose exec -T latex bash -c "cd /workspace/src/SJIS && TEXINPUTS=.:../../src//: LANG=ja_JP.SJIS LC_ALL=ja_JP.SJIS platex -interaction=nonstopmode $(notdir $<)" || true; \
-		docker compose exec -T latex bash -c "cd /workspace/src/SJIS && dvipdfmx -o ../../build/$(notdir $(basename $<)).pdf $(notdir $(basename $<)).dvi" || true; \
-	else \
-		echo "通常ファイルをコンパイル: $<"; \
-		docker compose exec -T latex bash -c "cd /workspace && TEXINPUTS=./src//: latexmk -pdfdvi $<" || true; \
-	fi
-	docker compose exec -T latex cp build/$(notdir $(basename $<)).pdf $@ || true
+	@echo "$(call get_file_type,$<)ファイルをコンパイル: $<"
+	@$(call compile_by_encoding,$<)
+	@$(CP_CMD) build/$(notdir $(basename $<)).pdf $@ || true
+
+# ヘルパー関数: 単一ファイルコンパイル
+define compile_single_file
+	@echo "コンパイル: $(1)"
+	@rel_path=$$(echo "$(1)" | sed 's|^src/||'); \
+	pdf_dir=pdf/$$(dirname "$$rel_path"); \
+	mkdir -p "$$pdf_dir"; \
+	$(call compile_by_encoding,$(1)); \
+	pdf_name=$$(echo "$$rel_path" | sed 's/\.tex$$/\.pdf/'); \
+	$(CP_CMD) build/$$(basename $(basename $(1))).pdf "pdf/$$pdf_name" || true
+endef
 
 # LaTeX 関連コマンド
 compile: ## src 下の .tex ファイルをコンパイル（エンコーディング対応）
 	@mkdir -p pdf build
-	@for tex in $(TEX_FILES); do \
-		echo "コンパイル: $$tex"; \
-		rel_path=$$(echo "$$tex" | sed 's|^src/||'); \
-		pdf_dir=pdf/$$(dirname "$$rel_path"); \
-		mkdir -p "$$pdf_dir"; \
-		if echo "$$tex" | grep -q "UTF8/"; then \
-			echo "UTF-8ファイルをコンパイル: $$tex"; \
-			$(DOCKER_PREFIX) bash -c "cd /workspace/src/UTF8 && TEXINPUTS=.:../../src//: LANG=ja_JP.UTF-8 LC_ALL=ja_JP.UTF-8 uplatex -interaction=nonstopmode $$(basename $$tex)" || true; \
-			$(DOCKER_PREFIX) bash -c "cd /workspace/src/UTF8 && dvipdfmx -o ../../build/$$(basename $${tex%.tex}).pdf $$(basename $${tex%.tex}).dvi" || true; \
-		elif echo "$$tex" | grep -q "SJIS/"; then \
-			echo "SJISファイルをコンパイル: $$tex"; \
-			$(DOCKER_PREFIX) bash -c "cd /workspace/src/SJIS && TEXINPUTS=.:../../src//: LANG=ja_JP.SJIS LC_ALL=ja_JP.SJIS platex -interaction=nonstopmode $$(basename $$tex)" || true; \
-			$(DOCKER_PREFIX) bash -c "cd /workspace/src/SJIS && dvipdfmx -o ../../build/$$(basename $${tex%.tex}).pdf $$(basename $${tex%.tex}).dvi" || true; \
-		else \
-			echo "通常ファイルをコンパイル: $$tex"; \
-			$(LATEX_CMD) $$tex || true; \
-		fi; \
-		pdf_name=$$(echo "$$rel_path" | sed 's/\.tex$$/\.pdf/'); \
-		$(CP_CMD) build/$$(basename $${tex%.tex}).pdf "pdf/$$pdf_name" || true; \
-	done
+	@$(foreach tex,$(TEX_FILES),$(call compile_single_file,$(tex));)
 	@echo "コンパイル完了"
 
 watch: ## ファイル変更を監視してコンパイル（全環境対応）
@@ -111,51 +114,54 @@ clean-all: ## すべての LaTeX 生成ファイルを削除
 	done
 	$(RM_CMD) pdf/* build/*
 
-# Docker 関連コマンド実行時の実行環境チェック
-# devcontainer 下で docker コマンドを実行できないので、その場合は警告文を表示して終了する
-check_docker_cmd = @if [ "$(IN_DEVCONTAINER)" = "1" ]; then \
-	echo "[ERROR] Dev Container 環境では Docker 関連コマンドは使用できません"; \
-	exit 1; \
-fi
-
-# Docker 関連コマンド
-build: ## Docker イメージをビルド
-	$(check_docker_cmd)
-	docker compose build
-
-up: ## コンテナを起動（バックグラウンド）
-	$(check_docker_cmd)
-	docker compose up -d
-
-down: ## コンテナを停止・削除
-	$(check_docker_cmd)
-	docker compose down
-
-exec: ## コンテナに接続
-	$(check_docker_cmd)
-	docker compose exec latex bash
-
-stop: ## コンテナを停止
-	$(check_docker_cmd)
-	docker compose stop
-
-logs: ## コンテナのログを表示
-	$(check_docker_cmd)
-	docker compose logs -f latex
-
-# 開発用コマンド
-setup: ## 初回セットアップ (ビルド + 起動)
+# ヘルパー関数: Docker環境チェック
+define check_docker_env
 	@if [ "$(IN_DEVCONTAINER)" = "1" ]; then \
-		echo "[INFO] Dev Container 環境では make setup による初回セットアップは不要です。"; \
+		echo "[ERROR] Dev Container 環境では Docker 関連コマンドは使用できません"; \
+		exit 1; \
+	fi
+endef
+
+# ヘルパー関数: 環境別メッセージ表示
+define show_env_message
+	@if [ "$(IN_DEVCONTAINER)" = "1" ]; then \
+		echo "[INFO] Dev Container 環境では $(1) は不要です。"; \
 		echo "以下のコマンドでコンパイルできます:"; \
 		echo "  make compile  # src 下の .tex ファイルをコンパイル"; \
 		echo "  make watch   # ファイルの変更を監視してコンパイル"; \
 	else \
-		make build up; \
-		echo "環境構築を完了しました。以下のコマンドでコンパイルできます:"; \
-		echo "  make compile  # src 下の .tex ファイルをコンパイル"; \
-		echo "  make watch   # ファイルの変更を監視してコンパイル"; \
+		$(2); \
 	fi
+endef
+
+# Docker 関連コマンド
+build: ## Docker イメージをビルド
+	$(call check_docker_env)
+	docker compose build
+
+up: ## コンテナを起動（バックグラウンド）
+	$(call check_docker_env)
+	docker compose up -d
+
+down: ## コンテナを停止・削除
+	$(call check_docker_env)
+	docker compose down
+
+exec: ## コンテナに接続
+	$(call check_docker_env)
+	docker compose exec latex bash
+
+stop: ## コンテナを停止
+	$(call check_docker_env)
+	docker compose stop
+
+logs: ## コンテナのログを表示
+	$(call check_docker_env)
+	docker compose logs -f latex
+
+# 開発用コマンド
+setup: ## 初回セットアップ (ビルド + 起動)
+	$(call show_env_message,make setup による初回セットアップ,make build up && echo "環境構築を完了しました。以下のコマンドでコンパイルできます:" && echo "  make compile  # src 下の .tex ファイルをコンパイル" && echo "  make watch   # ファイルの変更を監視してコンパイル")
 
 dev: ## 開発モード (起動 + 監視コンパイル)
 	@if [ "$(IN_DEVCONTAINER)" = "1" ]; then \
@@ -166,11 +172,11 @@ dev: ## 開発モード (起動 + 監視コンパイル)
 	fi
 
 restart: ## コンテナを再起動
-	$(check_docker_cmd)
+	$(call check_docker_env)
 	@make down up
 
 rebuild: ## 完全に再ビルド
-	$(check_docker_cmd)
+	$(call check_docker_env)
 	@make down build up
 
 # ファイル操作

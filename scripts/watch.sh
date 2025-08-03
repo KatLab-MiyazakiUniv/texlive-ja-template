@@ -60,13 +60,14 @@ convert_dvi_to_pdf() {
   fi
 }
 
-# LaTeXコンパイルを実行する関数
+# LaTeXコンパイルを実行する関数（複数回実行対応）
 compile_latex() {
   local tex="$1"
   local encoding="$2"
   local compiler="$3"
 
   local tex_file="$(basename "$tex")"
+  local tex_base="$(basename "$tex" .tex)"
   local paths=($(get_paths "$tex"))
   local output_dir="${paths[0]}"
   local texinputs_path="${paths[1]}"
@@ -74,7 +75,7 @@ compile_latex() {
   # 中間ファイルをクリーンアップ
   cleanup_intermediate_files "$tex" "$output_dir"
 
-  # LaTeXコンパイル実行
+  # LaTeXコンパイルコマンドを準備
   local compile_cmd
   if [[ "$encoding" == "UTF8" ]]; then
     compile_cmd="TEXINPUTS=\"$texinputs_path\" LANG=ja_JP.UTF-8 LC_ALL=ja_JP.UTF-8 $compiler -output-directory=\"$output_dir\" -interaction=nonstopmode \"$tex_file\""
@@ -84,6 +85,55 @@ compile_latex() {
     compile_cmd="TEXINPUTS=\"$texinputs_path\" LANG=ja_JP.UTF-8 LC_ALL=ja_JP.UTF-8 $compiler -output-directory=\"$output_dir\" -interaction=nonstopmode \"$tex\""
   fi
 
+  # 1回目のコンパイル
+  log_info "First compilation pass for $tex"
+  eval "$compile_cmd" || true
+
+  # pBibTeX処理（.auxファイルから\bibdataを検出した場合）
+  local aux_file="${output_dir}/${tex_base}.aux"
+  
+  log_info "Debug: Checking aux file: $aux_file"
+  if [[ -f "$aux_file" ]]; then
+    log_info "Debug: aux file exists"
+    if grep -q "\\\\bibdata" "$aux_file"; then
+      log_info "Debug: bibdata found in aux file"
+      log_info "Running pBibTeX for $tex"
+      cd "$(dirname "$aux_file")"
+      log_info "Debug: Current directory: $(pwd)"
+      
+      # 必要なファイルを直接buildディレクトリにコピー
+      local source_dir
+      if [[ "$tex" =~ IPSJ/UTF8/ ]]; then
+        source_dir="/workspace/src/IPSJ/UTF8"
+      elif [[ "$tex" =~ IPSJ/SJIS/ ]]; then
+        source_dir="/workspace/src/IPSJ/SJIS"
+      else
+        source_dir="/workspace/src"
+      fi
+      
+      log_info "Debug: Copying files from $source_dir"
+      cp "$source_dir"/*.bst . 2>/dev/null || log_warn "No .bst files found"
+      cp "$source_dir"/*.bib . 2>/dev/null || log_warn "No .bib files found"
+      
+      # ファイルの存在確認
+      log_info "Debug: Files in current directory:"
+      ls -la *.bst *.bib 2>/dev/null || log_warn "No .bst or .bib files found"
+      
+      pbibtex "$tex_base" || log_warn "pBibTeX failed for $tex_base"
+      cd - >/dev/null
+    else
+      log_info "Debug: no bibdata found in aux file"
+    fi
+  else
+    log_info "Debug: aux file does not exist"
+  fi
+
+  # 2回目のコンパイル（参照解決のため）
+  log_info "Second compilation pass for $tex"
+  eval "$compile_cmd" || true
+
+  # 3回目のコンパイル（相互参照の完全解決のため）
+  log_info "Third compilation pass for $tex"
   eval "$compile_cmd" || true
 
   # DVIからPDFへの変換
@@ -123,9 +173,49 @@ tex_compile() {
   else
     log_info "Standard encoding: $tex"
 
-    # 標準エンコーディングの場合は特別処理
+    # 標準エンコーディングの場合の複数回コンパイル
+    local tex_base="$(basename "$tex" .tex)"
+    
     cleanup_intermediate_files "$tex" "build"
+    
+    # 1回目のコンパイル
+    log_info "First compilation pass for $tex"
     TEXINPUTS=./src//: LANG=ja_JP.UTF-8 LC_ALL=ja_JP.UTF-8 uplatex -output-directory=build -interaction=nonstopmode "$tex" || true
+    
+    # pBibTeX処理
+    local aux_file="build/${tex_base}.aux"
+    
+    log_info "Debug: Standard encoding - Checking aux file: $aux_file"
+    if [[ -f "$aux_file" ]]; then
+      log_info "Debug: aux file exists"
+      if grep -q "\\\\bibdata" "$aux_file"; then
+        log_info "Debug: bibdata found in aux file"
+        log_info "Running pBibTeX for $tex"
+        cd build
+        log_info "Debug: Current directory: $(pwd)"
+        
+        # BIBINPUTSとBSTINPUTSを設定
+        export BIBINPUTS=".:../src/IPSJ/UTF8/:"
+        export BSTINPUTS=".:../src/IPSJ/UTF8/:"
+        log_info "Debug: BIBINPUTS=$BIBINPUTS"
+        log_info "Debug: BSTINPUTS=$BSTINPUTS"
+        pbibtex "$tex_base" || log_warn "pBibTeX failed for $tex_base"
+        cd - >/dev/null
+      else
+        log_info "Debug: no bibdata found in aux file"
+      fi
+    else
+      log_info "Debug: aux file does not exist"
+    fi
+    
+    # 2回目のコンパイル
+    log_info "Second compilation pass for $tex"
+    TEXINPUTS=./src//: LANG=ja_JP.UTF-8 LC_ALL=ja_JP.UTF-8 uplatex -output-directory=build -interaction=nonstopmode "$tex" || true
+    
+    # 3回目のコンパイル
+    log_info "Third compilation pass for $tex"
+    TEXINPUTS=./src//: LANG=ja_JP.UTF-8 LC_ALL=ja_JP.UTF-8 uplatex -output-directory=build -interaction=nonstopmode "$tex" || true
+    
     convert_dvi_to_pdf "$tex" "build"
   fi
 
