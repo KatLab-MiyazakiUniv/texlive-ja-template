@@ -78,21 +78,29 @@ pdf/%.pdf: src/%.tex
 	@$(call compile_by_encoding,$<)
 	@$(CP_CMD) build/$(notdir $(basename $<)).pdf $@ || true
 
-# ヘルパー関数: 単一ファイルコンパイル
-define compile_single_file
-	@echo "コンパイル: $(1)"
-	@rel_path=$$(echo "$(1)" | sed 's|^src/||'); \
-	pdf_dir=pdf/$$(dirname "$$rel_path"); \
-	mkdir -p "$$pdf_dir"; \
-	$(call compile_by_encoding,$(1)); \
-	pdf_name=$$(echo "$$rel_path" | sed 's/\.tex$$/\.pdf/'); \
-	$(CP_CMD) build/$$(basename $(basename $(1))).pdf "pdf/$$pdf_name" || true
-endef
-
 # LaTeX 関連コマンド
 compile: ## src 下の .tex ファイルをコンパイル（エンコーディング対応）
 	@mkdir -p pdf build
-	@$(foreach tex,$(TEX_FILES),$(call compile_single_file,$(tex));)
+	@for tex in $(TEX_FILES); do \
+		echo "コンパイル: $$tex"; \
+		rel_path=$$(echo "$$tex" | sed 's|^src/||'); \
+		pdf_dir=pdf/$$(dirname "$$rel_path"); \
+		mkdir -p "$$pdf_dir"; \
+		if echo "$$tex" | grep -q "UTF8/"; then \
+			echo "UTF-8ファイルをコンパイル: $$tex"; \
+			$(UTF8_COMPILE) $$(basename $$tex) || true; \
+			$(DVI_TO_PDF_UTF8)/$$(basename $${tex%.tex}).pdf $$(basename $${tex%.tex}).dvi || true; \
+		elif echo "$$tex" | grep -q "SJIS/"; then \
+			echo "SJISファイルをコンパイル: $$tex"; \
+			$(SJIS_COMPILE) $$(basename $$tex) || true; \
+			$(DVI_TO_PDF_SJIS)/$$(basename $${tex%.tex}).pdf $$(basename $${tex%.tex}).dvi || true; \
+		else \
+			echo "通常ファイルをコンパイル: $$tex"; \
+			$(LATEX_CMD) $$tex || true; \
+		fi; \
+		pdf_name=$$(echo "$$rel_path" | sed 's/\.tex$$/\.pdf/'); \
+		$(CP_CMD) build/$$(basename $${tex%.tex}).pdf "pdf/$$pdf_name" || true; \
+	done
 	@echo "コンパイル完了"
 
 watch: ## ファイル変更を監視してコンパイル（全環境対応）

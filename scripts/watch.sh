@@ -19,6 +19,36 @@ log_error() {
   echo "[ERROR] $*" >&2
 }
 
+log_debug() {
+  [[ "${DEBUG:-}" == "1" ]] && echo "[DEBUG] $*"
+}
+
+# エンコーディング判定関数
+detect_encoding() {
+  local tex="$1"
+
+  if [[ "$tex" =~ UTF8/ ]]; then
+    echo "UTF8"
+  elif [[ "$tex" =~ SJIS/ ]]; then
+    echo "SJIS"
+  else
+    echo "STANDARD"
+  fi
+}
+
+# ソースディレクトリを取得する関数
+get_source_dir() {
+  local tex="$1"
+
+  if [[ "$tex" =~ IPSJ/UTF8/ ]]; then
+    echo "/workspace/src/IPSJ/UTF8"
+  elif [[ "$tex" =~ IPSJ/SJIS/ ]]; then
+    echo "/workspace/src/IPSJ/SJIS"
+  else
+    echo "/workspace/src"
+  fi
+}
+
 # パス設定を決定する関数
 get_paths() {
   local tex="$1"
@@ -36,6 +66,74 @@ cleanup_intermediate_files() {
   local output_dir="$2"
 
   rm -f "${output_dir}/$(basename "$tex" .tex)".{aux,dvi,log,out,toc,synctex.gz}
+}
+
+# pBibTeX処理を統一する関数
+process_pbibtex() {
+  local tex="$1"
+  local tex_base="$2"
+  local output_dir="$3"
+
+  # 絶対パスでaux fileパスを構築
+  local aux_file
+  if [[ "$output_dir" = /* ]]; then
+    aux_file="${output_dir}/${tex_base}.aux"
+  else
+    aux_file="/workspace/${output_dir}/${tex_base}.aux"
+  fi
+
+  log_debug "Checking aux file: $aux_file"
+  log_debug "Current working directory: $(pwd)"
+
+  # auxファイルの存在とbibdataの確認を一定時間待機
+  local max_wait=3
+  local count=0
+  while [[ $count -lt $max_wait ]]; do
+    if [[ -f "$aux_file" ]] && grep -q "\\\\bibdata" "$aux_file"; then
+      break
+    fi
+    sleep 0.5
+    ((count++))
+  done
+  
+  if [[ -f "$aux_file" ]] && grep -q "\\\\bibdata" "$aux_file"; then
+    log_info "Running pBibTeX for $tex"
+
+    # buildディレクトリに移動
+    local build_dir="/workspace/build"
+    local original_dir="$(pwd)"
+    cd "$build_dir"
+
+    # 必要なファイルを直接buildディレクトリにコピー
+    local source_dir="$(get_source_dir "$tex")"
+
+    log_debug "Copying bibliography files from $source_dir"
+    cp "$source_dir"/*.bst . 2>/dev/null || log_warn "No .bst files found"
+    cp "$source_dir"/*.bib . 2>/dev/null || log_warn "No .bib files found"
+
+    # pBibTeX実行とファイル生成の確認
+    if pbibtex "$tex_base"; then
+      # .bblファイルの生成を確認
+      local bbl_file="${tex_base}.bbl"
+      local bbl_wait=0
+      while [[ ! -f "$bbl_file" && $bbl_wait -lt 5 ]]; do
+        sleep 0.2
+        ((bbl_wait++))
+      done
+      
+      if [[ -f "$bbl_file" ]]; then
+        log_debug "pBibTeX completed successfully, .bbl file generated"
+      else
+        log_warn "pBibTeX completed but .bbl file not found"
+      fi
+    else
+      log_warn "pBibTeX failed for $tex_base"
+    fi
+
+    cd "$original_dir"
+  else
+    log_debug "No bibliography processing needed for $tex"
+  fi
 }
 
 # DVIからPDFへの変換を行う関数
@@ -89,44 +187,8 @@ compile_latex() {
   log_info "First compilation pass for $tex"
   eval "$compile_cmd" || true
 
-  # pBibTeX処理（.auxファイルから\bibdataを検出した場合）
-  local aux_file="${output_dir}/${tex_base}.aux"
-  
-  log_info "Debug: Checking aux file: $aux_file"
-  if [[ -f "$aux_file" ]]; then
-    log_info "Debug: aux file exists"
-    if grep -q "\\\\bibdata" "$aux_file"; then
-      log_info "Debug: bibdata found in aux file"
-      log_info "Running pBibTeX for $tex"
-      cd "$(dirname "$aux_file")"
-      log_info "Debug: Current directory: $(pwd)"
-      
-      # 必要なファイルを直接buildディレクトリにコピー
-      local source_dir
-      if [[ "$tex" =~ IPSJ/UTF8/ ]]; then
-        source_dir="/workspace/src/IPSJ/UTF8"
-      elif [[ "$tex" =~ IPSJ/SJIS/ ]]; then
-        source_dir="/workspace/src/IPSJ/SJIS"
-      else
-        source_dir="/workspace/src"
-      fi
-      
-      log_info "Debug: Copying files from $source_dir"
-      cp "$source_dir"/*.bst . 2>/dev/null || log_warn "No .bst files found"
-      cp "$source_dir"/*.bib . 2>/dev/null || log_warn "No .bib files found"
-      
-      # ファイルの存在確認
-      log_info "Debug: Files in current directory:"
-      ls -la *.bst *.bib 2>/dev/null || log_warn "No .bst or .bib files found"
-      
-      pbibtex "$tex_base" || log_warn "pBibTeX failed for $tex_base"
-      cd - >/dev/null
-    else
-      log_info "Debug: no bibdata found in aux file"
-    fi
-  else
-    log_info "Debug: aux file does not exist"
-  fi
+  # pBibTeX処理
+  process_pbibtex "$tex" "$tex_base" "$output_dir"
 
   # 2回目のコンパイル（参照解決のため）
   log_info "Second compilation pass for $tex"
@@ -140,6 +202,31 @@ compile_latex() {
   convert_dvi_to_pdf "$tex" "$output_dir"
 }
 
+# 標準エンコーディング用のコンパイル関数
+compile_standard() {
+  local tex="$1"
+  local tex_base="$(basename "$tex" .tex)"
+
+  cleanup_intermediate_files "$tex" "build"
+
+  # 1回目のコンパイル
+  log_info "First compilation pass for $tex"
+  TEXINPUTS=./src//: LANG=ja_JP.UTF-8 LC_ALL=ja_JP.UTF-8 uplatex -output-directory=build -interaction=nonstopmode "$tex" || true
+
+  # pBibTeX処理
+  process_pbibtex "$tex" "$tex_base" "build"
+
+  # 2回目のコンパイル
+  log_info "Second compilation pass for $tex"
+  TEXINPUTS=./src//: LANG=ja_JP.UTF-8 LC_ALL=ja_JP.UTF-8 uplatex -output-directory=build -interaction=nonstopmode "$tex" || true
+
+  # 3回目のコンパイル
+  log_info "Third compilation pass for $tex"
+  TEXINPUTS=./src//: LANG=ja_JP.UTF-8 LC_ALL=ja_JP.UTF-8 uplatex -output-directory=build -interaction=nonstopmode "$tex" || true
+
+  convert_dvi_to_pdf "$tex" "build"
+}
+
 # メインのコンパイル関数
 tex_compile() {
   local tex="$1"
@@ -147,77 +234,32 @@ tex_compile() {
 
   local original_dir="$(pwd)"
 
-  # エンコーディングとコンパイラを判定
-  if [[ "$tex" =~ UTF8/ ]]; then
-    log_info "UTF-8 encoding detected: $tex"
+  local encoding="$(detect_encoding "$tex")"
 
-    if [[ "$tex" =~ IPSJ/UTF8/ ]]; then
-      cd src/IPSJ/UTF8
-    else
-      cd src/UTF8
-    fi
-
-    compile_latex "$tex" "UTF8" "uplatex"
-
-  elif [[ "$tex" =~ SJIS/ ]]; then
-    log_info "SJIS encoding detected: $tex"
-
-    if [[ "$tex" =~ IPSJ/SJIS/ ]]; then
-      cd src/IPSJ/SJIS
-    else
-      cd src/SJIS
-    fi
-
-    compile_latex "$tex" "SJIS" "platex"
-
-  else
-    log_info "Standard encoding: $tex"
-
-    # 標準エンコーディングの場合の複数回コンパイル
-    local tex_base="$(basename "$tex" .tex)"
-    
-    cleanup_intermediate_files "$tex" "build"
-    
-    # 1回目のコンパイル
-    log_info "First compilation pass for $tex"
-    TEXINPUTS=./src//: LANG=ja_JP.UTF-8 LC_ALL=ja_JP.UTF-8 uplatex -output-directory=build -interaction=nonstopmode "$tex" || true
-    
-    # pBibTeX処理
-    local aux_file="build/${tex_base}.aux"
-    
-    log_info "Debug: Standard encoding - Checking aux file: $aux_file"
-    if [[ -f "$aux_file" ]]; then
-      log_info "Debug: aux file exists"
-      if grep -q "\\\\bibdata" "$aux_file"; then
-        log_info "Debug: bibdata found in aux file"
-        log_info "Running pBibTeX for $tex"
-        cd build
-        log_info "Debug: Current directory: $(pwd)"
-        
-        # BIBINPUTSとBSTINPUTSを設定
-        export BIBINPUTS=".:../src/IPSJ/UTF8/:"
-        export BSTINPUTS=".:../src/IPSJ/UTF8/:"
-        log_info "Debug: BIBINPUTS=$BIBINPUTS"
-        log_info "Debug: BSTINPUTS=$BSTINPUTS"
-        pbibtex "$tex_base" || log_warn "pBibTeX failed for $tex_base"
-        cd - >/dev/null
+  case "$encoding" in
+    "UTF8")
+      log_info "UTF-8 encoding detected: $tex"
+      if [[ "$tex" =~ IPSJ/UTF8/ ]]; then
+        cd src/IPSJ/UTF8
       else
-        log_info "Debug: no bibdata found in aux file"
+        cd src/UTF8
       fi
-    else
-      log_info "Debug: aux file does not exist"
-    fi
-    
-    # 2回目のコンパイル
-    log_info "Second compilation pass for $tex"
-    TEXINPUTS=./src//: LANG=ja_JP.UTF-8 LC_ALL=ja_JP.UTF-8 uplatex -output-directory=build -interaction=nonstopmode "$tex" || true
-    
-    # 3回目のコンパイル
-    log_info "Third compilation pass for $tex"
-    TEXINPUTS=./src//: LANG=ja_JP.UTF-8 LC_ALL=ja_JP.UTF-8 uplatex -output-directory=build -interaction=nonstopmode "$tex" || true
-    
-    convert_dvi_to_pdf "$tex" "build"
-  fi
+      compile_latex "$tex" "UTF8" "uplatex"
+      ;;
+    "SJIS")
+      log_info "SJIS encoding detected: $tex"
+      if [[ "$tex" =~ IPSJ/SJIS/ ]]; then
+        cd src/IPSJ/SJIS
+      else
+        cd src/SJIS
+      fi
+      compile_latex "$tex" "SJIS" "platex"
+      ;;
+    "STANDARD")
+      log_info "Standard encoding: $tex"
+      compile_standard "$tex"
+      ;;
+  esac
 
   cd "$original_dir"
 
@@ -253,6 +295,9 @@ compile_single() {
   log_info "Single file compilation finished for: $tex"
 }
 
+# コンパイル進行中フラグ
+declare -A compilation_in_progress
+
 # シグナルハンドリング
 trap 'log_info "Watch stopped"; exit 0' SIGINT SIGTERM
 
@@ -264,6 +309,7 @@ declare -A file_times
 # 初期ファイル時刻を記録
 while IFS= read -r -d '' tex; do
   file_times["$tex"]=$(stat -c %Y "$tex" 2>/dev/null || stat -f %m "$tex")
+  compilation_in_progress["$tex"]=0
   log_info "Tracking: $tex"
 done < <(find src -name "*.tex" -type f -print0)
 
@@ -272,9 +318,32 @@ while true; do
   while IFS= read -r -d '' tex; do
     current=$(stat -c %Y "$tex" 2>/dev/null || stat -f %m "$tex")
     if [[ "${file_times[$tex]:-}" != "$current" ]]; then
+      # コンパイル進行中の場合はスキップ
+      if [[ "${compilation_in_progress[$tex]:-0}" == "1" ]]; then
+        log_debug "Skipping compilation for $tex (already in progress)"
+        continue
+      fi
+      
       file_times["$tex"]=$current
       log_info "Change detected in: $tex"
+      
+      # コンパイル開始フラグを設定
+      compilation_in_progress["$tex"]=1
+      
+      # 短い待機時間で複数変更をまとめる
+      sleep 0.5
+      
+      # 再度時刻をチェックして、さらに変更があった場合は最新を取得
+      latest=$(stat -c %Y "$tex" 2>/dev/null || stat -f %m "$tex")
+      if [[ "$current" != "$latest" ]]; then
+        file_times["$tex"]=$latest
+        log_debug "Multiple changes detected, using latest version"
+      fi
+      
       compile_single "$tex"
+      
+      # コンパイル完了フラグをリセット
+      compilation_in_progress["$tex"]=0
     fi
   done < <(find src -name "*.tex" -type f -print0)
   sleep 1
