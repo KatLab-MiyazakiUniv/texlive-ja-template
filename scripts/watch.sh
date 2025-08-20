@@ -54,9 +54,9 @@ get_paths() {
   local tex="$1"
 
   if [[ "$tex" =~ IPSJ/ ]]; then
-    echo "../../../build" ".:./../../../src//:"
+    echo "/workspace/build" ".:./../../../src//:"
   else
-    echo "../../build" ".:../../src//:"
+    echo "/workspace/build" ".:../../src//:"
   fi
 }
 
@@ -65,7 +65,12 @@ cleanup_intermediate_files() {
   local tex="$1"
   local output_dir="$2"
 
-  rm -f "${output_dir}/$(basename "$tex" .tex)".{aux,dvi,log,out,toc,synctex.gz}
+  # output_dirが絶対パスでない場合は/workspace/buildに正規化
+  if [[ "$output_dir" != "/workspace/build" ]]; then
+    output_dir="/workspace/build"
+  fi
+
+  rm -f "${output_dir}/$(basename "$tex" .tex)".{aux,dvi,log,out,toc,synctex.gz,bbl,blg}
 }
 
 # pBibTeX処理を統一する関数
@@ -86,16 +91,16 @@ process_pbibtex() {
   log_debug "Current working directory: $(pwd)"
 
   # auxファイルの存在とbibdataの確認を一定時間待機
-  local max_wait=3
+  local max_wait=5
   local count=0
   while [[ $count -lt $max_wait ]]; do
     if [[ -f "$aux_file" ]] && grep -q "\\\\bibdata" "$aux_file"; then
       break
     fi
-    sleep 0.5
+    sleep 1
     ((count++))
   done
-  
+
   if [[ -f "$aux_file" ]] && grep -q "\\\\bibdata" "$aux_file"; then
     log_info "Running pBibTeX for $tex"
 
@@ -116,13 +121,15 @@ process_pbibtex() {
       # .bblファイルの生成を確認
       local bbl_file="${tex_base}.bbl"
       local bbl_wait=0
-      while [[ ! -f "$bbl_file" && $bbl_wait -lt 5 ]]; do
-        sleep 0.2
+      while [[ ! -f "$bbl_file" && $bbl_wait -lt 10 ]]; do
+        sleep 0.5
         ((bbl_wait++))
       done
-      
+
       if [[ -f "$bbl_file" ]]; then
-        log_debug "pBibTeX completed successfully, .bbl file generated"
+        log_info "pBibTeX completed successfully, .bbl file generated"
+        # .bblファイルをソースディレクトリにもコピー
+        cp "$bbl_file" "$source_dir/" 2>/dev/null && log_debug "Copied .bbl file to source directory"
       else
         log_warn "pBibTeX completed but .bbl file not found"
       fi
@@ -145,11 +152,63 @@ convert_dvi_to_pdf() {
   local pdf_output="${output_dir}/$(basename "$tex" .tex).pdf"
 
   if [[ -f "$dvi_file" ]]; then
-    if dvipdfmx -o "$pdf_output" "$dvi_file" 2>/dev/null; then
+    # buildディレクトリに移動してimagesディレクトリをコピー
+    local source_dir="$(get_source_dir "$tex")"
+    local build_dir="/workspace/build"
+    local original_dir="$(pwd)"
+
+    cd "$build_dir"
+    if [[ -d "$source_dir/images" ]]; then
+      log_debug "Copying images from $source_dir/images to $build_dir"
+      rm -rf images 2>/dev/null
+      if ! cp -r "$source_dir/images" . 2>/dev/null; then
+        # ディレクトリが既に存在する場合は内容を同期
+        if [[ -d images ]]; then
+          log_debug "Images directory exists, syncing contents"
+          cp -r "$source_dir/images/"* images/ 2>/dev/null || log_warn "Failed to sync images directory contents"
+        else
+          log_warn "Failed to copy images directory"
+        fi
+      fi
+    fi
+
+    # 絶対パスを使用してDVI→PDF変換
+    local abs_dvi_file
+    local abs_pdf_output
+    
+    # buildディレクトリは常に/workspace/buildに正規化
+    if [[ "$output_dir" == "../../../build" ]]; then
+      abs_dvi_file="/workspace/build/$(basename "$tex" .tex).dvi"
+      abs_pdf_output="/workspace/build/$(basename "$tex" .tex).pdf"
+    elif [[ "$output_dir" == "../../build" ]]; then
+      abs_dvi_file="/workspace/build/$(basename "$tex" .tex).dvi"
+      abs_pdf_output="/workspace/build/$(basename "$tex" .tex).pdf"
+    elif [[ "$output_dir" == "build" ]]; then
+      abs_dvi_file="/workspace/build/$(basename "$tex" .tex).dvi"
+      abs_pdf_output="/workspace/build/$(basename "$tex" .tex).pdf"
+    else
+      # 絶対パスの場合
+      if [[ "$dvi_file" = /* ]]; then
+        abs_dvi_file="$dvi_file"
+      else
+        abs_dvi_file="/workspace/$dvi_file"
+      fi
+      
+      if [[ "$pdf_output" = /* ]]; then
+        abs_pdf_output="$pdf_output"
+      else
+        abs_pdf_output="/workspace/$pdf_output"
+      fi
+    fi
+    
+    log_debug "Converting DVI to PDF: dvipdfmx -o $abs_pdf_output $abs_dvi_file"
+    if dvipdfmx -o "$abs_pdf_output" "$abs_dvi_file"; then
       log_info "LaTeX compilation successful for $tex"
+      cd "$original_dir"
       return 0
     else
       log_warn "DVI to PDF conversion failed for $tex"
+      cd "$original_dir"
       return 1
     fi
   else
@@ -158,73 +217,24 @@ convert_dvi_to_pdf() {
   fi
 }
 
-# LaTeXコンパイルを実行する関数（複数回実行対応）
-compile_latex() {
+# 統一コンパイル関数（full-compile.shを使用）
+compile_unified() {
   local tex="$1"
   local encoding="$2"
-  local compiler="$3"
 
-  local tex_file="$(basename "$tex")"
   local tex_base="$(basename "$tex" .tex)"
-  local paths=($(get_paths "$tex"))
-  local output_dir="${paths[0]}"
-  local texinputs_path="${paths[1]}"
-
-  # 中間ファイルをクリーンアップ
-  cleanup_intermediate_files "$tex" "$output_dir"
-
-  # LaTeXコンパイルコマンドを準備
-  local compile_cmd
-  if [[ "$encoding" == "UTF8" ]]; then
-    compile_cmd="TEXINPUTS=\"$texinputs_path\" LANG=ja_JP.UTF-8 LC_ALL=ja_JP.UTF-8 $compiler -output-directory=\"$output_dir\" -interaction=nonstopmode \"$tex_file\""
-  elif [[ "$encoding" == "SJIS" ]]; then
-    compile_cmd="TEXINPUTS=\"$texinputs_path\" LANG=ja_JP.SJIS LC_ALL=ja_JP.SJIS $compiler -output-directory=\"$output_dir\" -interaction=nonstopmode \"$tex_file\""
-  else
-    compile_cmd="TEXINPUTS=\"$texinputs_path\" LANG=ja_JP.UTF-8 LC_ALL=ja_JP.UTF-8 $compiler -output-directory=\"$output_dir\" -interaction=nonstopmode \"$tex\""
-  fi
-
-  # 1回目のコンパイル
-  log_info "First compilation pass for $tex"
-  eval "$compile_cmd" || true
-
-  # pBibTeX処理
-  process_pbibtex "$tex" "$tex_base" "$output_dir"
-
-  # 2回目のコンパイル（参照解決のため）
-  log_info "Second compilation pass for $tex"
-  eval "$compile_cmd" || true
-
-  # 3回目のコンパイル（相互参照の完全解決のため）
-  log_info "Third compilation pass for $tex"
-  eval "$compile_cmd" || true
-
-  # DVIからPDFへの変換
-  convert_dvi_to_pdf "$tex" "$output_dir"
+  
+  log_info "Unified compilation for $tex (encoding: $encoding)"
+  bash /workspace/scripts/full-compile.sh "$tex_base" "$encoding" || log_error "Unified compilation failed for $tex"
 }
 
-# 標準エンコーディング用のコンパイル関数
+# 標準エンコーディング用のコンパイル関数（統一版）
 compile_standard() {
   local tex="$1"
   local tex_base="$(basename "$tex" .tex)"
 
-  cleanup_intermediate_files "$tex" "build"
-
-  # 1回目のコンパイル
-  log_info "First compilation pass for $tex"
-  TEXINPUTS=./src//: LANG=ja_JP.UTF-8 LC_ALL=ja_JP.UTF-8 uplatex -output-directory=build -interaction=nonstopmode "$tex" || true
-
-  # pBibTeX処理
-  process_pbibtex "$tex" "$tex_base" "build"
-
-  # 2回目のコンパイル
-  log_info "Second compilation pass for $tex"
-  TEXINPUTS=./src//: LANG=ja_JP.UTF-8 LC_ALL=ja_JP.UTF-8 uplatex -output-directory=build -interaction=nonstopmode "$tex" || true
-
-  # 3回目のコンパイル
-  log_info "Third compilation pass for $tex"
-  TEXINPUTS=./src//: LANG=ja_JP.UTF-8 LC_ALL=ja_JP.UTF-8 uplatex -output-directory=build -interaction=nonstopmode "$tex" || true
-
-  convert_dvi_to_pdf "$tex" "build"
+  log_info "Standard compilation for $tex using latexmk"
+  TEXINPUTS=./src//: latexmk -pdfdvi "$tex" || log_error "Standard compilation failed for $tex"
 }
 
 # メインのコンパイル関数
@@ -240,20 +250,15 @@ tex_compile() {
     "UTF8")
       log_info "UTF-8 encoding detected: $tex"
       if [[ "$tex" =~ IPSJ/UTF8/ ]]; then
-        cd src/IPSJ/UTF8
+        compile_unified "$tex" "UTF8"
       else
         cd src/UTF8
+        compile_unified "$tex" "UTF8"
       fi
-      compile_latex "$tex" "UTF8" "uplatex"
       ;;
     "SJIS")
       log_info "SJIS encoding detected: $tex"
-      if [[ "$tex" =~ IPSJ/SJIS/ ]]; then
-        cd src/IPSJ/SJIS
-      else
-        cd src/SJIS
-      fi
-      compile_latex "$tex" "SJIS" "platex"
+      compile_unified "$tex" "SJIS"
       ;;
     "STANDARD")
       log_info "Standard encoding: $tex"
@@ -313,6 +318,13 @@ while IFS= read -r -d '' tex; do
   log_info "Tracking: $tex"
 done < <(find src -name "*.tex" -type f -print0)
 
+# .bibファイルも監視対象に追加
+while IFS= read -r -d '' bib; do
+  file_times["$bib"]=$(stat -c %Y "$bib" 2>/dev/null || stat -f %m "$bib")
+  compilation_in_progress["$bib"]=0
+  log_info "Tracking bibliography: $bib"
+done < <(find src -name "*.bib" -type f -print0)
+
 # メインの監視ループ
 while true; do
   while IFS= read -r -d '' tex; do
@@ -323,28 +335,52 @@ while true; do
         log_debug "Skipping compilation for $tex (already in progress)"
         continue
       fi
-      
+
       file_times["$tex"]=$current
       log_info "Change detected in: $tex"
-      
+
       # コンパイル開始フラグを設定
       compilation_in_progress["$tex"]=1
-      
+
       # 短い待機時間で複数変更をまとめる
       sleep 0.5
-      
+
       # 再度時刻をチェックして、さらに変更があった場合は最新を取得
       latest=$(stat -c %Y "$tex" 2>/dev/null || stat -f %m "$tex")
       if [[ "$current" != "$latest" ]]; then
         file_times["$tex"]=$latest
         log_debug "Multiple changes detected, using latest version"
       fi
-      
+
       compile_single "$tex"
-      
+
       # コンパイル完了フラグをリセット
       compilation_in_progress["$tex"]=0
     fi
   done < <(find src -name "*.tex" -type f -print0)
+
+  # .bibファイルの変更を監視
+  while IFS= read -r -d '' bib; do
+    current=$(stat -c %Y "$bib" 2>/dev/null || stat -f %m "$bib")
+    if [[ "${file_times[$bib]:-}" != "$current" ]]; then
+      file_times["$bib"]=$current
+      log_info "Bibliography change detected in: $bib"
+
+      # この.bibファイルを使用している.texファイルを見つけてコンパイル
+      bib_name="$(basename "$bib" .bib)"
+      tex_dir="$(dirname "$bib")"
+
+      # 同じディレクトリの.texファイルでこのbibファイルを参照しているものを検索
+      while IFS= read -r -d '' related_tex; do
+        if [[ -n "$related_tex" && "${compilation_in_progress[$related_tex]:-0}" == "0" ]]; then
+          log_info "Recompiling $related_tex due to bibliography change"
+          compilation_in_progress["$related_tex"]=1
+          compile_single "$related_tex"
+          compilation_in_progress["$related_tex"]=0
+        fi
+      done < <(find "$tex_dir" -name "*.tex" -type f -print0 | xargs -0 grep -l "\\\\bibliography{$bib_name}" 2>/dev/null | tr '\n' '\0')
+    fi
+  done < <(find src -name "*.bib" -type f -print0)
+
   sleep 1
 done

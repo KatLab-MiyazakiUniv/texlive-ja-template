@@ -26,10 +26,10 @@ CP_CMD          = $(DOCKER_PREFIX) $(CD_PREFIX) cp
 RM_CMD          = $(DOCKER_PREFIX) $(CD_PREFIX) rm -rf
 
 # エンコーディング別コンパイルコマンド
-UTF8_COMPILE    = $(DOCKER_PREFIX) bash -c "cd /workspace/src/UTF8 && TEXINPUTS=.:../../src//: LANG=ja_JP.UTF-8 LC_ALL=ja_JP.UTF-8 uplatex -interaction=nonstopmode"
-SJIS_COMPILE    = $(DOCKER_PREFIX) bash -c "cd /workspace/src/SJIS && TEXINPUTS=.:../../src//: LANG=ja_JP.SJIS LC_ALL=ja_JP.SJIS platex -interaction=nonstopmode"
-DVI_TO_PDF_UTF8 = $(DOCKER_PREFIX) bash -c "cd /workspace/src/UTF8 && dvipdfmx -o ../../build"
-DVI_TO_PDF_SJIS = $(DOCKER_PREFIX) bash -c "cd /workspace/src/SJIS && dvipdfmx -o ../../build"
+UTF8_COMPILE    = $(DOCKER_PREFIX) bash -c "cd /workspace/src/IPSJ/UTF8 && TEXINPUTS=.:../../../src//: LANG=ja_JP.UTF-8 LC_ALL=ja_JP.UTF-8 uplatex -interaction=nonstopmode"
+SJIS_COMPILE    = $(DOCKER_PREFIX) bash -c "cd /workspace/src/IPSJ/SJIS && TEXINPUTS=.:../../../src//: LANG=ja_JP.SJIS LC_ALL=ja_JP.SJIS platex -interaction=nonstopmode"
+DVI_TO_PDF_UTF8 = $(DOCKER_PREFIX) bash -c "cd /workspace/src/IPSJ/UTF8 && dvipdfmx -o ../../../build"
+DVI_TO_PDF_SJIS = $(DOCKER_PREFIX) bash -c "cd /workspace/src/IPSJ/SJIS && dvipdfmx -o ../../../build"
 
 # ファイル監視スクリプト（全環境対応）
 WATCH_CMD       = $(DOCKER_PREFIX) bash -c "sed -i 's/\r$$//' /workspace/scripts/watch.sh && bash /workspace/scripts/watch.sh"
@@ -60,13 +60,13 @@ define get_file_type
 $(if $(findstring UTF8/,$(1)),UTF8,$(if $(findstring SJIS/,$(1)),SJIS,NORMAL))
 endef
 
-# ヘルパー関数: エンコーディング別コンパイル
+# ヘルパー関数: エンコーディング別コンパイル（統一版）
 define compile_by_encoding
 $(if $(filter UTF8,$(call get_file_type,$(1))),\
-	$(UTF8_COMPILE) $(notdir $(1)) || true && $(DVI_TO_PDF_UTF8)/$(notdir $(basename $(1))).pdf $(notdir $(basename $(1))).dvi || true,\
+	echo "UTF8ファイルを多重コンパイル: $(1)" && $(DOCKER_PREFIX) bash /workspace/scripts/full-compile.sh $(notdir $(basename $(1))) UTF8 || true,\
 	$(if $(filter SJIS,$(call get_file_type,$(1))),\
-		$(SJIS_COMPILE) $(notdir $(1)) || true && $(DVI_TO_PDF_SJIS)/$(notdir $(basename $(1))).pdf $(notdir $(basename $(1))).dvi || true,\
-		$(DOCKER_PREFIX) bash -c "cd /workspace && TEXINPUTS=./src//: latexmk -pdfdvi $(1)" || true\
+		echo "SJISファイルを多重コンパイル: $(1)" && $(DOCKER_PREFIX) bash /workspace/scripts/full-compile.sh $(notdir $(basename $(1))) SJIS || true,\
+		echo "通常ファイルをコンパイル: $(1)" && $(DOCKER_PREFIX) bash -c "cd /workspace && TEXINPUTS=./src//: latexmk -pdfdvi $(1)" || true\
 	)\
 )
 endef
@@ -86,18 +86,8 @@ compile: ## src 下の .tex ファイルをコンパイル（エンコーディ�
 		rel_path=$$(echo "$$tex" | sed 's|^src/||'); \
 		pdf_dir=pdf/$$(dirname "$$rel_path"); \
 		mkdir -p "$$pdf_dir"; \
-		if echo "$$tex" | grep -q "UTF8/"; then \
-			echo "UTF-8ファイルをコンパイル: $$tex"; \
-			$(UTF8_COMPILE) $$(basename $$tex) || true; \
-			$(DVI_TO_PDF_UTF8)/$$(basename $${tex%.tex}).pdf $$(basename $${tex%.tex}).dvi || true; \
-		elif echo "$$tex" | grep -q "SJIS/"; then \
-			echo "SJISファイルをコンパイル: $$tex"; \
-			$(SJIS_COMPILE) $$(basename $$tex) || true; \
-			$(DVI_TO_PDF_SJIS)/$$(basename $${tex%.tex}).pdf $$(basename $${tex%.tex}).dvi || true; \
-		else \
-			echo "通常ファイルをコンパイル: $$tex"; \
-			$(LATEX_CMD) $$tex || true; \
-		fi; \
+		echo "$(call get_file_type,$$tex)ファイルをコンパイル: $$tex"; \
+		$(call compile_by_encoding,$$tex); \
 		pdf_name=$$(echo "$$rel_path" | sed 's/\.tex$$/\.pdf/'); \
 		$(CP_CMD) build/$$(basename $${tex%.tex}).pdf "pdf/$$pdf_name" || true; \
 	done
@@ -212,6 +202,9 @@ convert-punctuation: ## 指定したIPSJファイルの句読点を変換（例:
 	@echo "句読点を変換中: $(FILE)"
 	@$(DOCKER_PREFIX) bash -c "cd /workspace && cp '$(FILE)' '$(FILE).bak' && sed -i 's/、/，/g; s/。/．/g' '$(FILE)'"
 	@echo "変換完了。元ファイルは $(FILE).bak として保存されました。"
+	@echo "参照番号を正しく表示するため、コンパイレーションを実行中..."
+	@$(call compile_by_encoding,$(FILE))
+	@echo "コンパイレーション完了。参照番号が正しく表示されるはずです。"
 	@echo "元に戻すには: make restore-punctuation FILE=$(FILE)"
 
 restore-punctuation: ## 変換前の句読点に戻す（例: make restore-punctuation FILE=src/IPSJ/UTF8/sample.tex）
