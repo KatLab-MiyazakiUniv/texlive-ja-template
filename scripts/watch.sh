@@ -175,7 +175,7 @@ convert_dvi_to_pdf() {
     # 絶対パスを使用してDVI→PDF変換
     local abs_dvi_file
     local abs_pdf_output
-    
+
     # buildディレクトリは常に/workspace/buildに正規化
     if [[ "$output_dir" == "../../../build" ]]; then
       abs_dvi_file="/workspace/build/$(basename "$tex" .tex).dvi"
@@ -193,14 +193,14 @@ convert_dvi_to_pdf() {
       else
         abs_dvi_file="/workspace/$dvi_file"
       fi
-      
+
       if [[ "$pdf_output" = /* ]]; then
         abs_pdf_output="$pdf_output"
       else
         abs_pdf_output="/workspace/$pdf_output"
       fi
     fi
-    
+
     log_debug "Converting DVI to PDF: dvipdfmx -o $abs_pdf_output $abs_dvi_file"
     if dvipdfmx -o "$abs_pdf_output" "$abs_dvi_file"; then
       log_info "LaTeX compilation successful for $tex"
@@ -223,7 +223,7 @@ compile_unified() {
   local encoding="$2"
 
   local tex_base="$(basename "$tex" .tex)"
-  
+
   log_info "Unified compilation for $tex (encoding: $encoding)"
   bash /workspace/scripts/full-compile.sh "$tex_base" "$encoding" || log_error "Unified compilation failed for $tex"
 }

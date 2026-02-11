@@ -1,8 +1,26 @@
-.PHONY: help build up down exec clean compile watch pdf stop logs convert-punctuation restore-punctuation
+.PHONY: help build up down exec clean compile watch pdf stop logs convert-punctuation restore-punctuation kill-make
 
 # TeXファイルのリストを取得（サブディレクトリも含む）
 TEX_FILES := $(shell find src -name "*.tex" -type f)
 PDF_FILES := $(patsubst src/%.tex,pdf/%.pdf,$(TEX_FILES))
+
+# プロセス管理関数
+define kill_existing_make_processes
+	@echo "既存のmakeプロセスをチェック中..."
+	@if [ -f .make.pid ]; then \
+		old_pid=$$(cat .make.pid); \
+		if kill -0 $$old_pid 2>/dev/null; then \
+			echo "既存のmakeプロセス(PID: $$old_pid)を終了中..."; \
+			kill $$old_pid 2>/dev/null || true; \
+			sleep 1; \
+			kill -9 $$old_pid 2>/dev/null || true; \
+			echo "既存のプロセスを終了しました"; \
+		fi; \
+		rm -f .make.pid; \
+	fi
+	@$(DOCKER_PREFIX) pkill -f "watch.sh" 2>/dev/null || echo "Docker内のwatchプロセスを終了しました"
+	@echo $$$$ > .make.pid
+endef
 
 # 実行環境の判定
 IN_DEVCONTAINER := $(shell test -f /.dockerenv && test -f /workspace/.devcontainer/devcontainer.json && echo 1 || echo 0)
@@ -35,7 +53,10 @@ DVI_TO_PDF_SJIS = $(DOCKER_PREFIX) bash -c "cd /workspace/src/IPSJ/SJIS && dvipd
 WATCH_CMD       = $(DOCKER_PREFIX) bash -c "sed -i 's/\r$$//' /workspace/scripts/watch.sh && bash /workspace/scripts/watch.sh"
 
 # デフォルトターゲット - 初回コンパイル後、自動監視開始
-all: compile-all ## すべての TeX ファイルを PDF に変換し、監視開始
+all: ## すべての TeX ファイルを PDF に変換し、監視開始
+	$(call kill_existing_make_processes)
+	@$(MAKE) compile-all
+	@$(MAKE) watch
 
 # 初回コンパイル（監視なし）
 compile-all: $(PDF_FILES) ## すべての TeX ファイルを PDF に変換（監視なし）
@@ -47,13 +68,19 @@ compile-all: $(PDF_FILES) ## すべての TeX ファイルを PDF に変換（�
 	fi
 
 # デフォルト：初回コンパイル後、監視開始
-default: compile-all watch ## 初回コンパイル後、ファイル監視開始
+default: ## 初回コンパイル後、ファイル監視開始
+	$(call kill_existing_make_processes)
+	@$(MAKE) compile-all
+	@$(MAKE) watch
 
 .DEFAULT_GOAL := default
 
 help: ## ヘルプを表示
 	@echo "利用可能なコマンド:"
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-15s\033[0m %s\n", $$1, $$2}'
+
+kill-make: ## 既存のmakeプロセスを強制終了
+	$(call kill_existing_make_processes)
 
 # ヘルパー関数: ファイルタイプを判定
 define get_file_type
@@ -94,9 +121,10 @@ compile: ## src 下の .tex ファイルをコンパイル（エンコーディ�
 	@echo "コンパイル完了"
 
 watch: ## ファイル変更を監視してコンパイル（全環境対応）
+	$(call kill_existing_make_processes)
 	@mkdir -p pdf build
 	@echo "watching: src/**/*.tex (auto-detecting best method for your environment)"
-	$(WATCH_CMD)
+	@trap 'rm -f .make.pid; exit' INT TERM; $(WATCH_CMD)
 
 clean: ## LaTeX 中間ファイルを削除
 	@for tex in $(TEX_FILES); do \

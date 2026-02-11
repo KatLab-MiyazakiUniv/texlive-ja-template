@@ -22,3 +22,4 @@ build/
 # IDE
 .vscode/
 .idea/
+.make.pid
