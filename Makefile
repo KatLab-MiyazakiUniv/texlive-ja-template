@@ -1,8 +1,26 @@
-.PHONY: help build up down exec clean compile watch pdf stop logs
+.PHONY: help build up down exec clean compile watch pdf stop logs convert-punctuation restore-punctuation kill-make
 
-# TeXファイルのリストを取得
-TEX_FILES := $(wildcard src/*.tex)
+# TeXファイルのリストを取得（サブディレクトリも含む）
+TEX_FILES := $(shell find src -name "*.tex" -type f)
 PDF_FILES := $(patsubst src/%.tex,pdf/%.pdf,$(TEX_FILES))
+
+# プロセス管理関数
+define kill_existing_make_processes
+	@echo "既存のmakeプロセスをチェック中..."
+	@if [ -f .make.pid ]; then \
+		old_pid=$$(cat .make.pid); \
+		if kill -0 $$old_pid 2>/dev/null; then \
+			echo "既存のmakeプロセス(PID: $$old_pid)を終了中..."; \
+			kill $$old_pid 2>/dev/null || true; \
+			sleep 1; \
+			kill -9 $$old_pid 2>/dev/null || true; \
+			echo "既存のプロセスを終了しました"; \
+		fi; \
+		rm -f .make.pid; \
+	fi
+	@$(DOCKER_PREFIX) pkill -f "watch.sh" 2>/dev/null || echo "Docker内のwatchプロセスを終了しました"
+	@echo $$$$ > .make.pid
+endef
 
 # 実行環境の判定
 IN_DEVCONTAINER := $(shell test -f /.dockerenv && test -f /workspace/.devcontainer/devcontainer.json && echo 1 || echo 0)
@@ -25,45 +43,88 @@ LATEX_CLEAN_ALL = $(DOCKER_PREFIX) $(CD_PREFIX) latexmk -C
 CP_CMD          = $(DOCKER_PREFIX) $(CD_PREFIX) cp
 RM_CMD          = $(DOCKER_PREFIX) $(CD_PREFIX) rm -rf
 
+# エンコーディング別コンパイルコマンド
+UTF8_COMPILE    = $(DOCKER_PREFIX) bash -c "cd /workspace/src/IPSJ/UTF8 && TEXINPUTS=.:../../../src//: LANG=ja_JP.UTF-8 LC_ALL=ja_JP.UTF-8 uplatex -interaction=nonstopmode"
+SJIS_COMPILE    = $(DOCKER_PREFIX) bash -c "cd /workspace/src/IPSJ/SJIS && TEXINPUTS=.:../../../src//: LANG=ja_JP.SJIS LC_ALL=ja_JP.SJIS platex -interaction=nonstopmode"
+DVI_TO_PDF_UTF8 = $(DOCKER_PREFIX) bash -c "cd /workspace/src/IPSJ/UTF8 && dvipdfmx -o ../../../build"
+DVI_TO_PDF_SJIS = $(DOCKER_PREFIX) bash -c "cd /workspace/src/IPSJ/SJIS && dvipdfmx -o ../../../build"
+
 # ファイル監視スクリプト（全環境対応）
 WATCH_CMD       = $(DOCKER_PREFIX) bash -c "sed -i 's/\r$$//' /workspace/scripts/watch.sh && bash /workspace/scripts/watch.sh"
-LATEX_SINGLE = $(LATEX_CMD)
 
-# デフォルトターゲット
-all: $(PDF_FILES) ## すべての TeX ファイルを PDF に変換
+# デフォルトターゲット - 初回コンパイル後、自動監視開始
+all: ## すべての TeX ファイルを PDF に変換し、監視開始
+	$(call kill_existing_make_processes)
+	@$(MAKE) compile-all
+	@$(MAKE) watch
+
+# 初回コンパイル（監視なし）
+compile-all: $(PDF_FILES) ## すべての TeX ファイルを PDF に変換（監視なし）
 	@if [ -n "$(TEX_FILES)" ]; then \
-		echo "コンパイル完了。ファイルの変更監視を開始します..."; \
-		make watch; \
+		echo "初回コンパイル完了。"; \
 	else \
 		echo "[WARNING] src/ ディレクトリに .tex ファイルが見つかりません。"; \
 		exit 1; \
 	fi
 
+# デフォルト：初回コンパイル後、監視開始
+default: ## 初回コンパイル後、ファイル監視開始
+	$(call kill_existing_make_processes)
+	@$(MAKE) compile-all
+	@$(MAKE) watch
+
+.DEFAULT_GOAL := default
+
 help: ## ヘルプを表示
 	@echo "利用可能なコマンド:"
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-15s\033[0m %s\n", $$1, $$2}'
 
-# ファイル別の PDF ビルドルール
+kill-make: ## 既存のmakeプロセスを強制終了
+	$(call kill_existing_make_processes)
+
+# ヘルパー関数: ファイルタイプを判定
+define get_file_type
+$(if $(findstring UTF8/,$(1)),UTF8,$(if $(findstring SJIS/,$(1)),SJIS,NORMAL))
+endef
+
+# ヘルパー関数: エンコーディング別コンパイル（統一版）
+define compile_by_encoding
+$(if $(filter UTF8,$(call get_file_type,$(1))),\
+	echo "UTF8ファイルを多重コンパイル: $(1)" && $(DOCKER_PREFIX) bash /workspace/scripts/full-compile.sh $(notdir $(basename $(1))) UTF8 || true,\
+	$(if $(filter SJIS,$(call get_file_type,$(1))),\
+		echo "SJISファイルを多重コンパイル: $(1)" && $(DOCKER_PREFIX) bash /workspace/scripts/full-compile.sh $(notdir $(basename $(1))) SJIS || true,\
+		echo "通常ファイルをコンパイル: $(1)" && $(DOCKER_PREFIX) bash -c "cd /workspace && TEXINPUTS=./src//: latexmk -pdfdvi $(1)" || true\
+	)\
+)
+endef
+
+# ファイル別の PDF ビルドルール（エンコーディング対応）
 pdf/%.pdf: src/%.tex
-	@mkdir -p pdf build
-	docker compose exec -T latex bash -c "cd /workspace && TEXINPUTS=./src//: latexmk -pdfdvi $<"
-	docker compose exec -T latex cp build/$(notdir $(basename $<)).pdf $@
+	@mkdir -p pdf build $(dir $@)
+	@echo "$(call get_file_type,$<)ファイルをコンパイル: $<"
+	@$(call compile_by_encoding,$<)
+	@$(CP_CMD) build/$(notdir $(basename $<)).pdf $@ || true
 
 # LaTeX 関連コマンド
-compile: ## src 下の .tex ファイルをコンパイル
+compile: ## src 下の .tex ファイルをコンパイル（エンコーディング対応）
 	@mkdir -p pdf build
 	@for tex in $(TEX_FILES); do \
 		echo "コンパイル: $$tex"; \
-		$(LATEX_CMD) $$tex; \
-		$(CP_CMD) build/$$(basename $${tex%.tex}).pdf pdf/; \
+		rel_path=$$(echo "$$tex" | sed 's|^src/||'); \
+		pdf_dir=pdf/$$(dirname "$$rel_path"); \
+		mkdir -p "$$pdf_dir"; \
+		echo "$(call get_file_type,$$tex)ファイルをコンパイル: $$tex"; \
+		$(call compile_by_encoding,$$tex); \
+		pdf_name=$$(echo "$$rel_path" | sed 's/\.tex$$/\.pdf/'); \
+		$(CP_CMD) build/$$(basename $${tex%.tex}).pdf "pdf/$$pdf_name" || true; \
 	done
-	@echo "コンパイル完了、ファイルの変更監視を開始"
-	@make watch
+	@echo "コンパイル完了"
 
 watch: ## ファイル変更を監視してコンパイル（全環境対応）
+	$(call kill_existing_make_processes)
 	@mkdir -p pdf build
-	@echo "watching: src/*.tex (auto-detecting best method for your environment)"
-	$(WATCH_CMD)
+	@echo "watching: src/**/*.tex (auto-detecting best method for your environment)"
+	@trap 'rm -f .make.pid; exit' INT TERM; $(WATCH_CMD)
 
 clean: ## LaTeX 中間ファイルを削除
 	@for tex in $(TEX_FILES); do \
@@ -79,51 +140,54 @@ clean-all: ## すべての LaTeX 生成ファイルを削除
 	done
 	$(RM_CMD) pdf/* build/*
 
-# Docker 関連コマンド実行時の実行環境チェック
-# devcontainer 下で docker コマンドを実行できないので、その場合は警告文を表示して終了する
-check_docker_cmd = @if [ "$(IN_DEVCONTAINER)" = "1" ]; then \
-	echo "[ERROR] Dev Container 環境では Docker 関連コマンドは使用できません"; \
-	exit 1; \
-fi
-
-# Docker 関連コマンド
-build: ## Docker イメージをビルド
-	$(check_docker_cmd)
-	docker compose build
-
-up: ## コンテナを起動（バックグラウンド）
-	$(check_docker_cmd)
-	docker compose up -d
-
-down: ## コンテナを停止・削除
-	$(check_docker_cmd)
-	docker compose down
-
-exec: ## コンテナに接続
-	$(check_docker_cmd)
-	docker compose exec latex bash
-
-stop: ## コンテナを停止
-	$(check_docker_cmd)
-	docker compose stop
-
-logs: ## コンテナのログを表示
-	$(check_docker_cmd)
-	docker compose logs -f latex
-
-# 開発用コマンド
-setup: ## 初回セットアップ (ビルド + 起動)
+# ヘルパー関数: Docker環境チェック
+define check_docker_env
 	@if [ "$(IN_DEVCONTAINER)" = "1" ]; then \
-		echo "[INFO] Dev Container 環境では make setup による初回セットアップは不要です。"; \
+		echo "[ERROR] Dev Container 環境では Docker 関連コマンドは使用できません"; \
+		exit 1; \
+	fi
+endef
+
+# ヘルパー関数: 環境別メッセージ表示
+define show_env_message
+	@if [ "$(IN_DEVCONTAINER)" = "1" ]; then \
+		echo "[INFO] Dev Container 環境では $(1) は不要です。"; \
 		echo "以下のコマンドでコンパイルできます:"; \
 		echo "  make compile  # src 下の .tex ファイルをコンパイル"; \
 		echo "  make watch   # ファイルの変更を監視してコンパイル"; \
 	else \
-		make build up; \
-		echo "環境構築を完了しました。以下のコマンドでコンパイルできます:"; \
-		echo "  make compile  # src 下の .tex ファイルをコンパイル"; \
-		echo "  make watch   # ファイルの変更を監視してコンパイル"; \
+		$(2); \
 	fi
+endef
+
+# Docker 関連コマンド
+build: ## Docker イメージをビルド
+	$(call check_docker_env)
+	docker compose build
+
+up: ## コンテナを起動（バックグラウンド）
+	$(call check_docker_env)
+	docker compose up -d
+
+down: ## コンテナを停止・削除
+	$(call check_docker_env)
+	docker compose down
+
+exec: ## コンテナに接続
+	$(call check_docker_env)
+	docker compose exec latex bash
+
+stop: ## コンテナを停止
+	$(call check_docker_env)
+	docker compose stop
+
+logs: ## コンテナのログを表示
+	$(call check_docker_env)
+	docker compose logs -f latex
+
+# 開発用コマンド
+setup: ## 初回セットアップ (ビルド + 起動)
+	$(call show_env_message,make setup による初回セットアップ,make build up && echo "環境構築を完了しました。以下のコマンドでコンパイルできます:" && echo "  make compile  # src 下の .tex ファイルをコンパイル" && echo "  make watch   # ファイルの変更を監視してコンパイル")
 
 dev: ## 開発モード (起動 + 監視コンパイル)
 	@if [ "$(IN_DEVCONTAINER)" = "1" ]; then \
@@ -134,11 +198,11 @@ dev: ## 開発モード (起動 + 監視コンパイル)
 	fi
 
 restart: ## コンテナを再起動
-	$(check_docker_cmd)
+	$(call check_docker_env)
 	@make down up
 
 rebuild: ## 完全に再ビルド
-	$(check_docker_cmd)
+	$(call check_docker_env)
 	@make down build up
 
 # ファイル操作
@@ -148,3 +212,38 @@ open-pdf: ## 生成されたPDFを開く（Mac用）
 	else \
 		echo "PDFファイルが見つかりません。先に make compile を実行してください。"; \
 	fi
+
+# IPSJ形式の句読点変換
+convert-punctuation: ## 指定したIPSJファイルの句読点を変換（例: make convert-punctuation FILE=src/IPSJ/UTF8/sample.tex）
+	@if [ -z "$(FILE)" ]; then \
+		echo "[ERROR] ファイルを指定してください。例: make convert-punctuation FILE=src/IPSJ/UTF8/sample.tex"; \
+		exit 1; \
+	fi
+	@if [ ! -f "$(FILE)" ]; then \
+		echo "[ERROR] ファイルが見つかりません: $(FILE)"; \
+		exit 1; \
+	fi
+	@if ! echo "$(FILE)" | grep -q "IPSJ/"; then \
+		echo "[ERROR] IPSJディレクトリ下のファイルを指定してください"; \
+		exit 1; \
+	fi
+	@echo "句読点を変換中: $(FILE)"
+	@$(DOCKER_PREFIX) bash -c "cd /workspace && cp '$(FILE)' '$(FILE).bak' && sed -i 's/、/，/g; s/。/．/g' '$(FILE)'"
+	@echo "変換完了。元ファイルは $(FILE).bak として保存されました。"
+	@echo "参照番号を正しく表示するため、コンパイレーションを実行中..."
+	@$(call compile_by_encoding,$(FILE))
+	@echo "コンパイレーション完了。参照番号が正しく表示されるはずです。"
+	@echo "元に戻すには: make restore-punctuation FILE=$(FILE)"
+
+restore-punctuation: ## 変換前の句読点に戻す（例: make restore-punctuation FILE=src/IPSJ/UTF8/sample.tex）
+	@if [ -z "$(FILE)" ]; then \
+		echo "[ERROR] ファイルを指定してください。例: make restore-punctuation FILE=src/IPSJ/UTF8/sample.tex"; \
+		exit 1; \
+	fi
+	@if [ ! -f "$(FILE).bak" ]; then \
+		echo "[ERROR] バックアップファイルが見つかりません: $(FILE).bak"; \
+		exit 1; \
+	fi
+	@echo "句読点を復元中: $(FILE)"
+	@$(DOCKER_PREFIX) bash -c "cd /workspace && mv '$(FILE).bak' '$(FILE)'"
+	@echo "復元完了: $(FILE)"

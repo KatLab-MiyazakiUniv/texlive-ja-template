@@ -1,0 +1,746 @@
+%%
+%% 研究報告用スイッチ
+%% [techrep]
+%%
+%% 欧文表記無しのスイッチ(etitle,eabstractは任意)
+%% [noauthor]
+%%
+
+%\documentclass[submit,techrep]{ipsj}
+\documentclass[submit,techrep,noauthor]{ipsj}
+
+% \usepackage[dvips]{graphicx}
+\usepackage[dvipdfmx]{graphicx}
+\usepackage{latexsym}
+
+\usepackage{amsmath}
+\usepackage{multirow}
+
+
+
+\def\Underline{\setbox0\hbox\bgroup\let\\\endUnderline}
+\def\endUnderline{\vphantom{y}\egroup\smash{\underline{\box0}}\\}
+\def\|{\verb|}
+
+% \setcounter{巻数}{59}
+% \setcounter{号数}{1}
+% \setcounter{page}{1}
+
+
+\受付{2025}{8}{27}
+% \再受付{2015}{7}{16}   %省略可能
+% \再再受付{2015}{7}{20} %省略可能
+% \再再受付{2015}{11}{20} %省略可能
+\採録{2025}{8}{27}
+
+
+
+
+\begin{document}
+
+
+\title{電子フォーム作成を目的とした\\
+記入欄自動検出およびラベル割付ツールの開発}
+
+% \etitle{Development of a Tool for Automatic Fill-in Fields Detection \\
+% and Labels Assignment to Generate Electronic Forms}
+
+\affiliate{UoM}{宮崎大学\\
+University of Miyazaki}
+\affiliate{CT}{codeless technology株式会社\\
+codeless technology inc.}
+
+% \affiliate{UoN}{長崎県立大学\\
+% University of Nagasaki}
+
+\author{木村 優哉}{Yuya Kimura}{UoM}[kimura@earth.cs.miyazaki-u.ac.jp]
+\author{片山 徹郎}{Tetsuro Katayama}{UoM}[kat@cs.miyazaki-u.ac.jp]
+\author{猿谷 吉行}{Yoshiyuki Saruya}{CT}[saruya@codeless-tech.com]
+\author{中武 範彰}{Noriaki Nakatake}{CT}[nakatake@codeless-tech.com]
+% \author{喜多 義弘}{Yoshihiro Kita}{UoN}
+% \author{山場 久昭}{Hisaaki Yamaba}{UoM}
+% \author{油田 健太郎}{Kentaro Aburada}{UoM}
+% \author{岡崎 直宣}{Naonobu Okazaki}{UoM}
+% \author{処理 花子}{Hanako Shori}{IPSJ}
+% \author{学会 次郎}{Jiro Gakkai}{IPSJ,JU}[gakkai.jiro@ipsj.or.jp]
+
+\begin{abstract}
+% 電⼦帳簿保存法が改正されたことにより，帳票のデータ保存が義務付けられ，帳票の電⼦化が推進されている．
+% 帳票の電⼦化は，スキャナやカメラで帳票を撮影することによって実現できる．
+% 簡単に電⼦化できる⼀⽅で，帳票に記⼊した内容は，⼈が⽬視で確認する必要がある．
+帳票の記入内容を効率的に管理する方法の1つとして，電子フォームを用いる方法がある．
+電子フォームを自動で作成するために，複数のツールが開発されている．
+しかし，帳票を紙媒体で管理している場合は，電子フォームを作成する際に，マウスのドラッグ操作で記入欄を配置する必要があるため，時間がかかるという課題がある．
+そこで本論文では，電子フォーム作成にかかる時間の削減を目的として，記入欄自動検出およびラベル割付ツールを開発する．
+開発するツールは，OpenCVによる画像処理で記入欄を自動検出し，その座標を取得する．
+また，光学文字認識により帳票内の文字と文字位置を取得し，大規模言語モデルにより，取得した文字から適切なデータ型（日付，文字列，数値）を推測する．
+さらに，推測したデータ型を参照して，ラベルを割り付ける．
+帳票構造を解析する既存研究と比較して，開発するツールはデータセットなどの事前準備が不要であり，電子文書と電子化文書の両方の帳票画像に対応できる．
+また，評価実験を行い，電子フォーム作成にかかる時間を削減できることを示した．
+
+% 効率的に帳票の記⼊内容を管理する⽅法の1つとして，電⼦フォームを⽤いる⽅法がある．
+% 電⼦フォームを⾃動で作成するために，複数のツールが開発されている．
+% しかし，帳票を紙媒体で管理している場合は，電⼦フォームを作成する際に，マウスのドラッグ操作で記⼊欄を配置する必要があるため，時間がかかるという課題がある．
+% そこで本論⽂は，電⼦フォーム作成にかかる時間の削減を⽬的として，記⼊欄⾃動検出およびラベル割付ツールを開発する．
+% 開発するツールは，帳票構造を解析する既存研究と⽐較して，データセットなどの事前準備が不要であり，電⼦⽂書，および，電⼦化⽂書の両⽅の帳票画像から記⼊欄を⾃動検出できる．
+% 評価実験を⾏い，電⼦フォーム作成にかかる時間を削減できることを⽰した．
+\end{abstract}
+
+
+\begin{jkeyword}
+画像処理，帳票構造解析，記入欄自動取得，光学文字認識，大規模言語モデル
+\end{jkeyword}
+
+% \begin{eabstract}
+% The digitalization of forms is being promoted because it is required saving as data format by amendment of Electronic Books Maintenance Act.
+% The digitalization of forms can be achieved by capturing them using a scanner or camera.
+% While this method offers the advantage of easy digitization, it also has the drawback that the contents filled in on the forms must be manually checked by a person.
+% One of the effective ways to manage contents filled in fields is using electronic forms.
+% Several tools have been developed to generate them automatically.
+% However, when you use a paper form, it takes time to generate electronic one because it is necessary to place fill-in fields on an electronic form by dragging them with a mouse.
+% This paper proposes a tool for automatic fill-in fields detection and labels assignment to reduce time required to place fill-in fields.
+% The developed tool does not require any preparation such as datasets, and it can automatically detect fill-in fields from both electronic documents and digitized documents.
+% From evaluation experiments, it has confirmed that the developed tool has reduced the time to generate an electronic form.
+% \end{eabstract}
+
+% \begin{ekeyword}
+% Image Processing, Form Structure Analysis, Automatic Fill-in Fields Detection, Optical Character Recognition, Large Language Models
+% \end{ekeyword}
+
+\maketitle
+
+% 1_introduction
+\section{はじめに}
+
+電子帳簿保存法が改正されたことにより，帳票のデータ保存が義務付けられ，帳票の電子化が推進されている\cite{specialwebsite_for_the_Electronic_Bookkeeping_System}．
+帳票の電子化は，スキャナやカメラで帳票を撮影することによって実現できる．
+簡単に電子化できる一方で，帳票に記入した内容は，人が目視で確認する必要がある．
+効率的に帳票の記入内容を管理する方法の1つとして，電子フォームを用いる方法がある．
+電子フォームを自動で作成するために，複数のツールが開発されている\cite{i-reporter}\cite{createform}．
+しかし，帳票を紙媒体で管理している場合は，電子フォームを作成する際に，マウスのドラッグ操作で記入欄を配置する必要があるため，時間がかかるという課題がある．
+
+そこで本論文では，電子フォーム作成にかかる時間の削減を目的として，記入欄自動検出およびラベル割付ツールを開発する．
+開発するツールは，以下の2つの機能を持つ．
+
+\begin{itemize}
+	\item 領域座標自動取得およびラベル割付機能 \\
+	領域座標自動取得およびラベル割付機能は，帳票画像を入力として，帳票画像中の矩形，および，下線で示された記入欄の座標をそれぞれ矩形領域座標，下線部領域座標として自動で取得し，各領域座標とそれに対してラベルを割り付けた結果をまとめたJSONファイルを出力とする機能である．
+	ラベルを割り付けることで，バリデーションチェックに必要な情報を付与できる．
+	\item 領域強調画像出力機能 \\
+	領域強調画像出力機能は，入力である帳票画像に対して，取得した領域座標とラベルを強調表示したPNG画像を出力する機能である．
+	これによって，領域座標自動取得およびラベル割付機能で出力したJSONファイルの内容を，目視で確認しやすくする．
+	本機能で出力する画像は，ランダムな色で，矩形，および，下線を描画した，1枚の領域強調画像である．
+\end{itemize}
+
+開発するツールは，帳票構造を解析する既存研究と比較して，データセットなどの事前準備が不要である．
+また，Wordやテキストファイルなど，デジタル情報として作成した文書である電子文書，および，紙媒体の書類をスキャンした，PDFファイルや画像の形式で保存した電子化文書の，両方の文書の画像から記入欄を自動検出できる．
+
+開発するツールは，以下の条件を全て満たす帳票画像を入力とする．
+なお，開発するツールにおいて，電子化文書はスマートフォンのカメラで撮影した帳票画像を想定する．
+
+\begin{itemize}
+	\item 帳票の電子文書または電子化文書の画像である
+	\item 帳票の背景が白色である
+	\item 日本語かつ横書きの帳票である
+	\item 文字が手書きではない
+	\item 入力欄が矩形または下線で示されている
+\end{itemize}
+
+また，開発するツールは，以下の2つを出力する．
+
+\begin{itemize}
+	\item 取得した領域座標とそれに対応するラベル，矩形領域と下線部領域のそれぞれで一意なID（番号）をまとめたJSONファイル
+	\item 取得した領域を色を付けて描画することで強調表示し，各領域座標に対応するラベルをテキストで描画した1枚の領域強調画像
+\end{itemize}
+
+
+% 2_related_research
+\section{関連研究}
+
+本章では，既存の電子フォーム作成ツールと，帳票構造解析の関連研究について述べる．
+帳票構造解析の関連研究については，事前準備が必要なものと，画像処理ベースのものに分けて述べる．
+
+\subsection{既存の電子フォーム作成ツール}
+
+既存の電子フォーム作成ツールである，i-Reporter\cite{i-reporter}やCreate!Form\cite{createform}は，帳票のExcelファイル，もしくは，画像ファイルを入力として，電子フォームを作成できる．
+これらの既存の電子フォーム作成ツールは，帳票をExcel ファイルとして管理している場合，Excel ファイルのレイアウトとセルの書式を保ったまま電子フォームを簡単に作成できる．
+一方，帳票を紙媒体で管理している場合は，既存の電子フォーム作成ツールを使用するために，帳票をExcel ファイルとして作成し，入力とするか，紙媒体の帳票を撮影した画像ファイルを入力として，電子フォームを手作業で作成する必要があり，それぞれ以下の2つの課題がある．
+
+\begin{itemize}
+	\item Excelファイルを入力とする場合，紙媒体の帳票のレイアウトをもとにExcelファイルを新たに作成する必要があり，使い慣れた既存の帳票のレイアウトが変わる場合がある．
+	\item 画像ファイルを入力とする場合，帳票の画像を背景として，GUIツールを用いたマウス操作で記入欄を配置する必要があるため，電子フォームの作成に時間がかかる．
+\end{itemize}
+
+% 2.1
+\subsection{事前準備が必要な関連研究}
+
+帳票構造解析の関連研究に，帳票構造テンプレートの登録や，学習モデルの準備などの，事前準備が必要なものがある\cite{10.5120/ijca2020919760}\cite{Nagarikar2021InputFR}\cite{lee-etal-2022-formnet}．
+
+例として，Kathait氏らの研究\cite{10.5120/ijca2020919760}では，帳票データのデジタル化を目的として，スキャンした帳票から手書きテキスト，および，チェックボックスを自動で抽出するシステムの提案と実装を行った．
+スキャンされたJPEG形式の手書き帳票画像とXMLファイルの帳票構造テンプレートを入力とし，JSON形式のレスポンスと，チェックボックスがあるかどうかを出力し，出力をデータベースへ登録する．
+帳票画像内の記入欄の座標や，何を記入すべきかを示す文字列を，XMLファイルとして格納することによって，帳票構造テンプレートを作成する．
+XMLファイルを用いたテンプレートマッチングによって，各記入欄の画像を別の画像ファイルとして保存する．
+また，Google Cloud Vision API\cite{google_cloud_vision_api}のTEXT\_DETECTION機能と，Inception v3の転移学習を用いて，帳票画像内の文字を取得する．
+Kathait氏らの研究では，手書き文字の認識ができる一方で，帳票構造テンプレートの登録や学習モデルの準備が必要である．
+
+% 2.2
+\subsection{画像処理ベースの関連研究}
+
+帳票構造解析の関連研究に，画像処理ベースの手法を用いたものがある\cite{yuan}\cite{711885}\cite{8786345}．
+
+例として，Yuan氏らの研究\cite{yuan}では，帳票のPDFファイルからページをまたぐ表構造を認識し，各セル内のテキストと位置関係をCSVファイルに出力する手法を提案した．
+PDFファイル，または，PNG形式やJPEG形式などの画像ファイルを入力とし，取得した文字を含むCSVファイルと，認識した表構造を強調表示する1枚の画像をそれぞれ出力する．
+OpenCV\cite{opencv_library}による画像処理とTesseractによる光学文字認識を用いて，テキストを含むセル同士の位置関係を，CSVファイルのセル構造に反映して保存する．
+矩形の記入欄の座標を処理の途中で表示するが，最終的な出力には含まない．
+Yuan氏らの研究では，ページをまたぐ表構造の認識ができる一方で，電子化文書のPDFについては入力対象外である．
+
+
+% 3_function
+\section{開発したツールの機能}
+
+本章では，開発したツールの機能について述べる．
+開発したツールは，以下の2つの機能を持つ．
+
+\begin{itemize}
+	\item 領域座標自動取得およびラベル割付機能
+	\item 領域強調画像出力機能
+\end{itemize}
+
+本研究では，開発したツールが帳票画像内の記入欄を検出し，取得した座標を領域座標，矩形の記入欄の領域座標を矩形領域座標，下線部の記入欄の領域座標を下線部領域座標とそれぞれ呼ぶ．
+また，光学文字認識によって得た文字から推測するデータ型を属性，文字の近傍に存在する領域座標に対して文字位置と属性から推測するデータ型をラベルと呼ぶ．
+
+% 3.1
+\subsection{領域座標自動取得およびラベル割付機能}
+
+領域座標自動取得およびラベル割付機能は，帳票画像中の矩形および下線で示された記入欄について，それらの領域座標を取得し，それぞれにラベルを割り付ける機能である．
+矩形領域座標として，左上頂点のxy座標，幅，および，高さを取得する．
+下線部領域座標として，左端点のxy座標，および，幅を取得する．
+入力は帳票画像であり，出力は領域座標とラベルをまとめたJSONファイルである．
+
+なお，出力するJSONファイルは，矩形領域のラベルと領域座標をまとめたrects配列と，下線部領域のラベルと領域座標をまとめたunderlines配列で構成する．
+出力する2つの配列は，以下のキーとオブジェクトから構成する．
+
+\begin{itemize}
+	\item 取得した各領域座標において，どの領域座標かを一意に定めるID（番号）を示すidキー
+	\item 領域座標に割り付けたラベルを示すlabelキー
+	\item 領域座標をまとめたcoordsオブジェクト
+	\begin{itemize}
+		\item 矩形領域の左上頂点，もしくは，下線部領域の左端点のx座標を示すxキー
+		\item 矩形領域の左上頂点，もしくは，下線部領域の左端点のy座標を示すyキー
+		\item 領域座標の幅を示すwidthキー
+		\item 領域座標の高さを示すheightキー（矩形領域座標のみ）
+	\end{itemize}
+\end{itemize}
+
+各領域座標のx座標，y座標を示すxキー，yキーはそれぞれ，画像左上を原点として，右方向をX軸の正方向，下方向をY軸の正方向とする座標系における座標値を示す．
+
+領域座標自動取得およびラベル割付機能が出力するJSONファイルの例を，\figref{fig:json}に示す．
+
+\begin{figure}[t]
+	\setbox0\vbox{
+		\hbox{\texttt{\{}}
+		\hbox{\texttt{\phantom{~~}"rects": [}}
+		\hbox{\texttt{\phantom{~~~~}\{}}
+		\hbox{\texttt{\phantom{~~~~~~}"id": 0,}}
+		\hbox{\texttt{\phantom{~~~~~~}"label": "string",}}
+		\hbox{\texttt{\phantom{~~~~~~}"coords": \{}}
+		\hbox{\texttt{\phantom{~~~~~~~~}"x": 339,}}
+		\hbox{\texttt{\phantom{~~~~~~~~}"y": 753,}}
+		\hbox{\texttt{\phantom{~~~~~~~~}"width": 900,}}
+		\hbox{\texttt{\phantom{~~~~~~~~}"height": 106}}
+		\hbox{\texttt{\phantom{~~~~~~}\}}}
+		\hbox{\texttt{\phantom{~~~~}\}}}
+		\hbox{\texttt{\phantom{~~}],}}
+		\hbox{\texttt{\phantom{~~}"underlines": [}}
+		\hbox{\texttt{\phantom{~~~~}\{}}
+		\hbox{\texttt{\phantom{~~~~~~}"id": 0,}}
+		\hbox{\texttt{\phantom{~~~~~~}"label": "string",}}
+		\hbox{\texttt{\phantom{~~~~~~}"coords": \{}}
+		\hbox{\texttt{\phantom{~~~~~~~~}"x": 1066,}}
+		\hbox{\texttt{\phantom{~~~~~~~~}"y": 298,}}
+		\hbox{\texttt{\phantom{~~~~~~~~}"width": 794}}
+		\hbox{\texttt{\phantom{~~~~~~}\}}}
+		\hbox{\texttt{\phantom{~~~~}\}}}
+		\hbox{\texttt{\phantom{~~}]}}
+		\hbox{\texttt{\}}}
+	}
+	\centerline{\fbox{\box0}}
+	\caption{出力するJSONファイルの例}
+	\ecaption{An example of output JSON file.}
+	\label{fig:json}
+\end{figure}
+
+各領域座標を取得するため，OpenCVによる画像処理を行う．
+出力するJSONファイルにおける，rects配列，および，underlines配列内のidキー，およびcoordsオブジェクトの各キーに対応する値を取得する．
+
+また，取得した各領域座標に対してラベルを割り付ける．
+入力である帳票画像に対してGoogle Cloud Vision APIによる光学文字認識を行う．
+帳票画像内の文字と，文字を囲むバウンディングボックスの各頂点のxy座標をそれぞれ取得する．
+文字を取得後，大規模言語モデルGemini\cite{gemini}による属性の推測を行う．
+本研究で用いる3つの属性を，以下に示す．
+
+\begin{itemize}
+	\item 日付（date）
+	\item 文字列（string）
+	\item 数値（number）
+\end{itemize}
+
+取得文字のデータ型が，上記3つのうちのいずれに該当するかを推測し，属性として取得する．
+
+領域座標，取得した文字とその文字位置，属性を用いて，文字位置の近傍に存在する領域座標を対象に属性を割り付け，ラベルとして取得する．
+出力するJSONファイルにおけるrects配列，および，underlines配列内の，labelキーに対応する値を取得する．
+
+% 3.2
+\subsection{領域強調画像出力機能}
+
+領域強調画像出力機能は，領域座標自動取得およびラベル割付機能で取得した領域とラベルを描画することによって，取得した領域を強調表示したPNG形式の画像を出力する機能である．
+入力は領域座標とラベルをまとめた組であり，出力は領域強調画像である．
+領域強調画像を出力することによって，領域座標自動取得およびラベル割付機能で出力したJSONファイルの内容を，目視で確認しやすくする．
+本機能で出力する画像は，ランダムな色で矩形，および，水平な直線と，その領域座標に割り付けたラベルを描画する．
+% 各領域をランダムな色で描画する理由は，矩形領域が隣接する際に，視認性が低下することを防ぐためである．
+
+領域強調画像出力機能が出力する領域強調画像の例を，\figref{fig:example_output_image}に示す．
+また，\figref{fig:example_output_image}の領域強調画像内で描画する，IDとラベルを示すテキストの形式を，\figref{fig:format_in_highlighted_image}に示す．
+
+\begin{figure}[t]
+	\begin{center}
+		\fbox{
+			\includegraphics[width=0.9\linewidth]{images/03_function/example_output_image.jpg}
+		}
+		\caption{出力する領域強調画像の例}
+		\ecaption{An example of the output highlighted area image.}
+		\label{fig:example_output_image}
+	\end{center}
+\end{figure}
+
+\begin{figure}[t]
+	\setbox0\vbox{
+		\hbox{\texttt{R\textless ID\textgreater :\textless label\textgreater}}
+		\hbox{\texttt{U\textless ID\textgreater :\textless label\textgreater}}
+	}
+	\centerline{\fbox{\box0}}
+	\caption{領域強調画像内に描画するテキストの形式}
+	\ecaption{Format of text drawn in the highlighted image.}
+	\label{fig:format_in_highlighted_image}
+\end{figure}
+
+IDとラベルを示すテキストは，矩形領域であればR，下線部領域であればUから始まる．
+\figref{fig:format_in_highlighted_image}の\textless ID\textgreater，および，\textless label\textgreater はそれぞれ，領域座標のIDとラベルを示し，出力するJSONファイルのidキー，labelキーに対応する値と一致する．
+
+% 4_implementation
+\section{開発したツールの実装}
+
+本章では，開発したツールの3つの処理部について述べる．
+開発したツールの構成を，\figref{fig:structure}に示す．
+
+\begin{figure*}[t]
+	\begin{center}
+		\includegraphics[width=0.9\linewidth,bb=0 0 1980 1114]{images/04_implementation/structure.jpg}
+		\caption{開発したツールの構成}
+		\ecaption{Structure of the developed tool.}
+		\label{fig:structure}
+	\end{center}
+\end{figure*}
+
+開発したツールは，領域座標取得部，ラベル割付部，ファイル出力部の3つの処理部で構成する．
+PNGもしくはJPEG形式の帳票画像を入力とし，記入欄を強調表示した画像と，記入欄の座標とラベルを含むJSONファイルを出力とする．
+入力として，電子文書，および，電子化文書の画像を受け取る．
+
+% 4.1
+\subsection{領域座標取得部}
+
+領域座標取得部は，帳票画像内の記入欄を検出し，領域座標を取得する処理部である．
+帳票画像を入力とし，領域座標を出力とする．
+出力は，ラベル割付部に渡す．
+矩形領域座標については左上頂点のxy座標と幅と高さを，下線部領域座標については左端点のxy座標と幅を，それぞれ取得する．
+
+領域座標取得部の処理の流れを，以下に示す．
+
+\begin{enumerate}
+	\item OpenCVのimread, cvtColor, GaussianBlur, threshold, getStructuringElement, および，dilate関数より，矩形領域座標取得のための画像を処理する．
+	\item OpenCVのfindContours関数より，矩形を検出し，矩形領域座標を取得する．
+	\item OpenCVのimread, cvtColor, および，threshold関数より，下線部領域座標取得のための画像を処理する．
+	\item OpenCVのHoughLinesP関数より，水平な直線を検出し，下線部領域座標を取得する．
+	\item 取得した矩形領域座標を参照し，取得した下線部領域座標のうち，矩形領域の一部であるものを除外する．
+	\item 画像左上を原点として，矩形領域座標を中心点のy座標が小さい順，y座標が同じである場合は，さらにx座標が小さい順にソートする．
+	\item 下線部領域座標も検出した直線の中点について，矩形領域の場合と同様にソートする．
+\end{enumerate}
+
+なお，矩形領域座標，および，下線部領域座標のソートする際に，y座標の差が10px以内である場合は，y座標が同じであるとみなしてグループ化する．
+グループ化後，x座標でグループ内を再ソートする．
+
+% 4.2
+\subsection{ラベル割付部}
+
+ラベル割付部は，取得した領域座標に対してラベルを割り付ける処理部である．
+領域座標取得部から受け取った領域座標を入力とし，領域座標とそのラベルの組を出力とする．
+出力は，ファイル出力部に渡す．
+ラベルを割り付けるため，帳票画像中の文字と文字位置を取得するため，Google Cloud Vision APIを用いる．
+また，属性を推測するため，大規模言語モデルであるGeminiを用いる．
+
+ラベル割付部の処理の流れを，以下に示す．
+
+\begin{enumerate}
+	\item 領域座標取得部で取得した矩形領域座標と下線部領域座標を，領域座標として受け取る．
+	\item Google Cloud Vision APIのTEXT\_DETECTION機能を用いて，帳票画像中の文字と文字位置を取得する．
+	\item 画像左上を原点として，文字位置の中心点のy座標が小さい順，y座標が同じである場合は，さらにx座標が小さい順にソートする．
+	\item 取得した文字から，日付，文字列，数値のいずれのデータ型に該当するかをGeminiによって推測し，属性として取得する．
+	\item ソートした文字の順番に従い，文字位置の中心点を基準として比較処理を行い，ラベルを割り付ける．
+	\begin{enumerate}
+		\item 矩形領域の右下頂点のx座標，および，y座標がどちらも大きい場合は，属性をその矩形領域のラベルとして割り付ける．
+		\item 下線部領域の右端点のx座標，および，y座標がどちらも大きい場合は，属性をその下線部領域のラベルとして割り付ける．
+	\end{enumerate}
+\end{enumerate}
+
+ラベルを割り付ける処理は，既にラベルを割りつけた記入欄については，あとに割りつけたラベルで上書きする．
+これは，日本語の帳票を書き進める順番に対応するため，および，別の領域座標のラベルを割り付けることを防ぐためである．
+例として，記入方向が変わる帳票の一部を，\figref{fig:label_order}に示す．
+
+\begin{figure}[t]
+	\begin{center}
+		\fbox{
+			\includegraphics[width=0.9\linewidth]{images/04_implementation/label_order.jpg}
+		}
+		\caption{記入方向が変わる帳票の例}
+		\ecaption{An example of a form with different writing directions.}
+		\label{fig:label_order}
+	\end{center}
+\end{figure}
+
+\figref{fig:label_order}の「合計」の列に，別の内容を記入する帳票画像内の記入欄が配置されている．
+このように，同じ内容を記入する縦方向に配置された帳票画像内の記入欄（\figref{fig:label_order}の青い矢印）の下に，別の内容を記入する横方向に配置された帳票画像内の記入欄（\figref{fig:label_order}の赤い矢印）がある場合についても，文字位置をソートした順番でラベルを更新する．
+これによって，別の文字の属性を参照することによる誤ったラベルの割り付けを防ぐ．
+
+% 4.3
+\subsection{ファイル出力部}
+
+ファイル出力部は，領域座標と，領域座標に対応するラベルを組とするJSON形式のファイル，および，JSONファイルの取得領域を強調表示したPNG形式の画像1枚を出力する処理部である．
+ラベル割付部から受け取った領域座標とそのラベルの組を入力とし，JSONファイルと1枚の領域強調画像を出力とする．
+
+出力するJSONファイルは，配列rectsと配列underlinesで構成し，矩形領域の情報と下線部領域の情報をそれぞれ持つ．
+配列rectsと，配列underlinesを，\figref{fig:json}に示す形式に整形後，JSONファイルを出力する．
+
+% 上の一文は下のをコメント外すなら，その下に移動すること
+% これら2つの配列は，それぞれ以下の情報をもつ．
+
+% \begin{itemize}
+% 	\item 配列ごとに一意であるid
+% 	\item 領域に割り付けているラベルを示すlabel
+% 	\item 領域座標を示すオブジェクトcoords
+% \end{itemize}
+
+出力する領域強調画像は，矩形領域と下線部領域をそれぞれランダムな色で描画し，各領域座標に対応するラベルをテキストで描画した1枚の画像である．
+描画するテキストの番号とラベルは，JSONファイルの各配列におけるidキーとlabelキーの値と一致する．
+
+% 5_indication
+\section{適用例}
+
+本章では，開発したツールが正しく動作することを，適用例を用いて確認する．
+紙面の都合上，矩形領域についてのみ本論文内で確認する．
+開発したツールに適用する帳票画像を，\figref{fig:example}に示す．
+
+\begin{figure}[t]
+	\begin{center}
+		\fbox{
+			\includegraphics[width=0.9\linewidth]{images/05_indication/example.jpg}
+		}
+		\caption{開発したツールを適用する帳票画像}
+		\ecaption{An example of a form to apply the developed tool.}
+		\label{fig:example}
+	\end{center}
+\end{figure}
+
+\figref{fig:example}の帳票画像を入力として，開発したツールが出力したJSONファイルと領域強調画像が，測定した矩形領域の位置，および，ラベルとそれぞれ一致することを確認する．
+% 具体的には，JSONファイルのrects配列と領域強調画像を参照し，矩形領域の出力結果を確認する．
+
+% 5.1
+% \subsection{矩形領域の出力結果}
+\figref{fig:example}の帳票画像を入力として，開発したツールが出力した領域強調画像のうち，矩形領域を強調した画像の一部を，\figref{fig:highlighted_rects_image}に示す．
+また，出力したJSONファイルのうち，rects配列の一部を，\figref{fig:highlighted_rects_json}に示す．
+
+\begin{figure}[t]
+	\begin{center}
+		\fbox{
+			\includegraphics[width=0.9\linewidth]{images/05_indication/highlighted_rects_image.jpg}
+		}
+		\caption{矩形領域を強調した領域強調画像の一部}
+		\ecaption{A part of the highlighted rectangle areas image.}
+		\label{fig:highlighted_rects_image}
+	\end{center}
+\end{figure}
+
+% 矩形領域について，出力するJSONファイルのrects配列におけるlabelキーに対応する値，およびcoordsオブジェクトの各キーに対応する値が，領域強調画像の出力と対応することを確認した．
+% 領域座標について，他の矩形領域に対しても，矩形領域座標を正しく取得していることを確認した．
+% ラベルについても，正しいラベルを割り付けていることを確認した．
+
+% % 5.2
+% \subsection{下線部領域の出力結果}
+% \figref{fig:example}に対して，開発したツールを適用し，出力した領域強調画像のうち，下線部領域を強調した画像の一部を，\figref{fig:highlighted_underlines_image}に示す．
+
+% \begin{figure}[t]
+% 	\begin{center}
+% 		\fbox{
+% 			\includegraphics[width=0.9\linewidth]{images/05_indication/highlighted_underlines_image.jpg}
+% 		}
+% 		\caption{下線部領域を強調した画像の一部}
+% 		\ecaption{A part of the highlighted underlined areas image.}
+% 		\label{fig:highlighted_underlines_image}
+% 	\end{center}
+% \end{figure}
+
+% 下線部領域について，出力するJSONファイルのunderlines配列におけるlabelキーに対応する値，およびcoordsオブジェクトの各値が，領域強調画像の出力と対応することを確認した．
+% 領域座標について，他の下線部領域に対しても，下線部領域座標を正しく取得していることを確認した．
+% ラベルについても，他の下線部領域に対して，正しいラベルを割り付けていることを確認した．
+
+\begin{figure}[t]
+	\setbox0\vbox{
+		\hbox{\texttt{\phantom{~~}\{}}
+		\hbox{\texttt{\phantom{~~~~}"id": 4,}}
+		\hbox{\texttt{\phantom{~~~~}"label": "string",}}
+		\hbox{\texttt{\phantom{~~~~}"coords": \{}}
+		\hbox{\texttt{\phantom{~~~~~~}"x": 275,}}
+		\hbox{\texttt{\phantom{~~~~~~}"y": 817,}}
+		\hbox{\texttt{\phantom{~~~~~~}"width": 733,}}
+		\hbox{\texttt{\phantom{~~~~~~}"height": 86}}
+		\hbox{\texttt{\phantom{~~~~}\}}}
+		\hbox{\texttt{\phantom{~~}\},}}
+		\hbox{\texttt{\phantom{~~}\{}}
+		\hbox{\texttt{\phantom{~~~~}"id": 5,}}
+		\hbox{\texttt{\phantom{~~~~}"label": "number",}}
+		\hbox{\texttt{\phantom{~~~~}"coords": \{}}
+		\hbox{\texttt{\phantom{~~~~~~}"x": 1016,}}
+		\hbox{\texttt{\phantom{~~~~~~}"y": 817,}}
+		\hbox{\texttt{\phantom{~~~~~~}"width": 292,}}
+		\hbox{\texttt{\phantom{~~~~~~}"height": 86}}
+		\hbox{\texttt{\phantom{~~~~}\}}}
+		\hbox{\texttt{\phantom{~~}\},}}
+	}
+	\centerline{\fbox{\box0}}
+	\caption{出力したJSONファイルのrects配列の一部}
+	\ecaption{A part of the output JSON file's rects array.}
+	\label{fig:highlighted_rects_json}
+\end{figure}
+
+\figref{fig:highlighted_rects_json}より，idキーに対応する値が4である矩形領域座標は，左上頂点のxy座標が(275, 817)であり，幅と高さがそれぞれ733，86，ラベルが"string"である．
+同様に，idキーに対応する値が5である矩形領域座標は，左上頂点のxy座標が(1016, 817)であり，幅と高さがそれぞれ292，86，ラベルが"number"である．
+\figref{fig:highlighted_rects_image}にある4番，および，5番の矩形領域のラベルはそれぞれ，"string", "number"である．
+\figref{fig:highlighted_rects_image}より，画像内に描画した矩形領域の番号のうち，4番の矩形領域は「品名」を記入する欄であり，5番の矩形領域は「数量」を記入する欄である．
+各矩形領域のラベルについて，「品名」は文字列(string)，「数量」は数値(number) がそれぞれ正しいラベルであるため，これら2つの矩形領域について，正しいラベルを割り付けていることを確認できた．
+他の矩形領域に対しても，一部を除き，正しいラベルを割り付けたことを確認した．
+領域座標について，他の矩形領域に対しても，矩形領域座標を正しく取得していることを確認した．
+
+同様に，下線部領域についても，取得した領域座標とラベルが正しいことを確認した．
+
+% 6_discussion
+\section{考察}
+
+本章では，評価実験を行い，開発したツールの有用性を評価する．
+また，開発したツールと先行研究を比較する．
+
+% 6.1
+\subsection{評価実験}
+
+開発したツールの有用性を評価するため，開発したツールを既存の電子フォーム作成ツールに適用し，評価実験を行う．
+適用する電子フォーム作成ツールは，帳票の画像を背景として，記入欄をGUIツールで配置することによって，電子フォームの作成を支援するWebアプリケーションである．
+開発したツールを適用することで，出力であるJSONファイルを参照し，記入欄を自動で配置する．
+
+実験の対象とした2つの帳票の画像を，\figref{fig:form_image_A}，および，\figref{fig:form_image_B}に示す．
+
+% 縦幅がちょっとズレていたので，高さを揃えるためにheightを指定しています．
+\begin{figure}[t]
+	\centering
+	\begin{minipage}[t]{0.5\columnwidth}
+		\centering
+		\fbox{
+			\includegraphics[height=5cm,keepaspectratio]{images/06_discussion/form_image_A.jpg}
+		}
+		\caption{帳票画像A}
+		\ecaption{Form image A}
+		\label{fig:form_image_A}
+	\end{minipage}%
+	\begin{minipage}[t]{0.5\columnwidth}
+		\centering
+		\includegraphics[height=5cm,keepaspectratio]{images/06_discussion/form_image_B.jpg}
+		\caption{帳票画像B}
+		\ecaption{Form image B}
+		\label{fig:form_image_B}
+	\end{minipage}
+\end{figure}
+
+\figref{fig:form_image_A}は，電子文書の画像であり，\figref{fig:form_image_B}は，電子化文書の画像である．
+以降，\figref{fig:form_image_A}の画像を，帳票画像A，\figref{fig:form_image_B}の画像を，帳票画像Bと呼ぶ．
+なお，帳票画像内に存在する記入欄の数は，それぞれ帳票画像Aに77個，帳票画像Bに49個である．
+
+評価実験は，宮崎大学の学生6名を対象として行う．
+実験で計測する3つの時間を，以下に示す．
+
+\begin{itemize}
+	\item 実行時間 \\
+	プログラムの動作開始から終了までにかかる時間
+	\item 配置時間 \\
+	全ての記入欄を適切に配置するまでにかかる時間
+	\item 合計時間 \\
+	実行時間と配置時間の合計
+\end{itemize}
+
+被験者が記入欄を配置するにあたり，以下の2つのケースがある．
+
+\begin{itemize}
+	\item ケース$\alpha$ \\
+	GUIツールのみを用いて記入欄を配置する．
+	\item ケース$\beta$ \\
+	GUIツールに開発したツールを適用し，必要に応じてツールが自動で配置した記入欄を修正する．
+\end{itemize}
+
+実験にあたり，被験者6名を2つのグループに分ける．
+まず，帳票画像Aに対して，一方のグループをケース$\alpha$，他方のグループをケース$\beta$として実験を行う．
+次に，帳票画像Bに対して，両グループの担当ケースを入れ替えて実験を行う．
+
+評価実験の手順を，以下に示す．
+
+\begin{enumerate}
+	\item 実験者は，実行時間の計測を開始し，開発したツールを実行する．
+	\item 実験者は，開発したツールがJSONファイルと領域強調画像の出力を確認し，実行時間の計測を終了する．
+	\item 実験者は，被験者に対して，実験対象の帳票画像と電子フォーム作成ツールの操作方法を説明する．
+	\item 実験者は，配置時間の計測を開始し，被験者は，各ケースに応じた配置方法で記入欄を配置する．
+	\item 実験者は，被験者が全ての記入欄を正しく配置したことを確認し，配置時間の計測を終了する．
+\end{enumerate}
+
+\begin{table}[t]
+	\centering
+	\caption{被験者が電子フォーム内に記入欄を配置するまでにかかった各計測時間の平均（分:秒）}
+	\ecaption{The average of measurement times it took the participants to place fill-in fields in electronic form (min:sec).}
+	\label{tab:measurement_times}
+	\begin{tabular}{clllll}
+		\hline
+		\multirow{2}{*}{計測時間の平均} & & \multicolumn{2}{c}{帳票画像A} & \multicolumn{2}{c}{帳票画像B} \\
+		\cline{3-6} & & ケース$\alpha$ & ケース$\beta$ & ケース$\alpha$ & ケース$\beta$ \\
+		\hline \hline
+		% 実行時間 & & -- & 0:08.48 & 0:10.55 & -- \\
+		% 配置時間 & & 9:09.48 & 4:36.22 & 4:29.43 & 6:26.91 \\
+		% 合計時間 & & 9:09.48 & \textbf{4:44.70} & \textbf{4:39.98} & 6:26.91 \\
+		実行時間 & & -- & 0:08.5 & -- & 0:10.5 \\
+		配置時間 & & 9:09.4 & 4:36.2 & 6:26.9 & 4:29.4 \\
+		合計時間 & & 9:09.4 & \textbf{4:44.7} & 6:26.9 & \textbf{4:39.9} \\
+		\hline
+	\end{tabular}
+\end{table}
+
+各帳票画像における各計測時間の平均を，\tabref{tab:measurement_times}に示す．
+\tabref{tab:measurement_times}より，帳票画像Aについて約4分25秒（約48.2\%），帳票画像Bについて約1分47秒（約27.6\%）の時間を削減したことがわかる．
+これは，開発したツールが電子フォーム内に記入欄を配置するまでにかかる時間を削減できることを示している．
+
+% 6.2
+\subsection{先行研究との比較}
+
+先行研究のうち，同じ画像ベースの手法を用いているYuan氏らの手法\cite{yuan}と比較する．
+帳票画像A，および，帳票画像Bに対して，実行時間と精度を比較する．
+
+速度について，Yuan氏らの手法の実行時間を計測し，開発したツールの実行時間と比較し，評価する．
+
+精度について，適合率と再現率を計測，および，比較し，取得した各領域座標の位置とラベルの正確さを評価する．
+適合率，および，再現率を算出する式を，以下に示す．
+
+\begin{displaymath}
+\text{適合率} = \frac{\text{正しく検出した記入欄の数}}{\text{出力した領域座標の数}}
+\end{displaymath}
+
+\begin{displaymath}
+\text{再現率} = \frac{\text{正しく検出した記入欄の数}}{\text{帳票画像内にある記入欄の数}}
+\end{displaymath}
+
+% 6.2.1
+\subsubsection{実行時間の比較}
+
+帳票画像A，Bについて，Yuan氏らの手法と開発したツールの実行時間を比較した結果を，\tabref{tab:execution_time_comparison}に示す．
+なお，\tabref{tab:execution_time_comparison}で示すそれぞれの時間は，「領域座標取得までの実行時間 （プログラム全体の実行時間）」の形で示す．
+
+\begin{table}[t]
+	\centering
+	\caption{Yuan氏らの手法と開発したツールの実行時間の比較（秒）}
+	\ecaption{Execution time comparison between \\ Yuan's method and the developed tool (sec).}
+	\label{tab:execution_time_comparison}
+	\begin{tabular}{cll}
+		\hline
+		帳票画像 & Yuan氏らの手法 & 開発したツール \\
+		\hline \hline
+		帳票画像A & 0.08(5.85) & 0.62(8.48) \\
+		帳票画像B & 0.14(0.14) & 1.56(10.55) \\
+		\hline
+	\end{tabular}
+\end{table}
+
+\tabref{tab:execution_time_comparison}より，開発したツールはYuan氏らの手法と比較して，2つの帳票画像について，実行時間が長い．
+これは，開発したツールが下線部領域の取得や，取得した水平直線のうち，矩形の一部であるものを除外する処理，領域強調画像の出力に時間を要するためであると考察する．
+
+% 6.2.2
+\subsubsection{精度の比較}
+
+帳票画像A，Bについて，Yuan氏らの手法と開発したツールの精度を比較した結果を，\tabref{tab:accuracy_comparison}に示す．
+なお，Yuan氏らの手法はラベルを割り付ける機能がないため，\tabref{tab:accuracy_comparison}における開発したツールの適合率と再現率は，「ラベルの間違いを考慮しない評価指標 （ラベルの間違いを考慮した評価指標）」の形で示す．
+
+\begin{table*}[t]
+	\centering
+	\caption{Yuan氏らの手法と開発したツールの精度比較（\%）}
+	\ecaption{Accuracy comparison between Yuan's method and the developed tool.}
+	\label{tab:accuracy_comparison}
+	\begin{tabular}{cllll}
+		\hline
+		\multirow{2}{*}{評価指標} & \multicolumn{2}{c}{帳票画像A} & \multicolumn{2}{c}{帳票画像B} \\
+		\cline{2-5} & Yuan氏らの手法 & 開発したツール & Yuan氏らの手法 & 開発したツール \\
+		\hline \hline
+		適合率 & 81.48 & \textbf{87.80（87.80）} & 検出なし & \textbf{84.00（66.00）} \\
+		再現率 & 85.71 & \textbf{93.51（93.51）} & 検出なし & \textbf{83.67（67.35）} \\
+		\hline
+	\end{tabular}
+\end{table*}
+
+\tabref{tab:accuracy_comparison}より，帳票画像Aについて，開発したツールはYuan氏らの手法と比較して，適合率，再現率がともに高いことがわかる．
+Yuan氏らの手法における再現率が，開発したツールにおける結果よりも低い理由として，Yuan氏らの手法は矩形のみを検出し，下線部の記入欄は検出できないためであると考察する．
+
+また，帳票画像Bについて，Yuan氏らの手法では，矩形を検出できなかった．
+その理由は，電子化文書の画像を入力の対象としていないためであると考察する．
+Yuan氏らの手法では，矩形取得のための二値化処理における閾値を220に固定しており，白黒でない画像を適切に二値化できないことが原因であると考察する．
+さらに，帳票画像Bにおいて，開発したツールにおけるラベルの間違いを考慮した再現率と適合率は，ラベルの間違いを考慮しない場合よりも低いことがわかる．
+これは，\figref{fig:form_image_B}中の「品目」という文字を「日目」と誤って文字取得し，日付として属性を推測したことで，「品目」の列にある9個の記入欄に日付のラベルを誤って割り付けたためである．
+
+\tabref{tab:execution_time_comparison}，および，\tabref{tab:accuracy_comparison}より，Yuan氏らの手法と比較して，開発したツールは帳票画像にある記入欄を自動検出する点で優れていることがわかる．
+
+% 7_conclusion
+\section{まとめ}
+
+本研究は，電子フォーム作成にかかる時間の削減を目的として，記入欄自動検出およびラベル割付ツールを開発した．
+開発したツールの出力である領域座標とラベルの精度を確認するため，開発したツールと先行研究の手法における，それぞれの適合率と再現率について考察した．
+開発したツールは，先行研究と比較して，精度の点で優れていることを確認した．
+
+また，開発したツールの有用性を評価するため，既存の電子フォーム作成ツールを用いて，記入欄を配置するまでにかかる時間を計測する実験を行った．
+2枚の帳票画像について，開発したツールを適用した場合と，GUIツールのみを用いた場合とを比較して，それぞれ平均で帳票画像Aについて約4分25秒（約48.2\%），帳票画像Bについて約1分47秒（約27.6\%）短いことがわかった．
+評価実験から，開発したツールは，電子フォーム内に記入欄を配置するまでにかかる時間を削減できることを確認した．
+
+以上のことから，本研究で開発したツールは，電子フォーム作成にかかる時間の削減に有用であると言える．
+
+今後の課題を，以下に示す．
+
+\begin{itemize}
+	\item 色がついた帳票を入力対象とした際の記入欄の認識精度向上
+	\item 記入欄と記入内容を示す欄の区別
+	\item 取得した記入欄への記入内容の紐付け
+\end{itemize}
+
+% \begin{biography}
+% \profile{n}{木村 優哉}{2001年生．2024年宮崎大学工学部情報システム工学科卒業．
+% 同年宮崎大学大学院工学研究科工学専攻先端情報コース修士課程入学．
+% }
+%
+% \profile{h,L}{学会 次郎}{1950年生．1974年架空大学大学院修士課程修了．
+% 1987年同博士課程修了．工学博士．1977年架空大学助手．1992年情報処理大学助
+% 教授．1987年同大教授．2000年から情報処理学会顧問．オンライン出版の研究
+% に従事．2010年情報処理記念賞受賞．情報処理学会理事．電子情報通信学会，
+% IEEE，IEEE-CS，ACM 各会員．}
+% \end{biography}
+
+% 文献リスト
+\bibliographystyle{ipsjunsrt}
+\bibliography{bib_EIP109_kimura}
+
+\end{document}
